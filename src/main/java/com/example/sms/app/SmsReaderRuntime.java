@@ -1,5 +1,6 @@
 package com.example.sms.app;
 
+import com.example.sms.config.AppConfig;
 import com.example.sms.modem.ModemInitializer;
 import com.example.sms.modem.SmsIndexDetector;
 import com.example.sms.redis.RedisPublisher;
@@ -9,18 +10,25 @@ import com.example.sms.smsreader.SmsMessage;
 import com.example.sms.smsreader.SmsService;
 
 import jakarta.annotation.PreDestroy;
+
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Component;
 
 @Component
+@RequiredArgsConstructor
 public class SmsReaderRuntime implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(SmsReaderRuntime.class);
@@ -32,6 +40,8 @@ public class SmsReaderRuntime implements ApplicationRunner {
     private final SmsIndexDetector indexDetector;
     private final SmsService smsService;
     private final RedisPublisher redisPublisher;
+    private final TaskScheduler taskScheduler;
+    private final AppConfig appConfig;
 
     private final ExecutorService commandExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "sms-command-thread");
@@ -41,20 +51,8 @@ public class SmsReaderRuntime implements ApplicationRunner {
 
     private volatile boolean running = false;
     private Thread pollThread;
-
-    public SmsReaderRuntime(SerialPortManager portManager,
-                            SerialReaderService readerService,
-                            ModemInitializer modemInitializer,
-                            SmsIndexDetector indexDetector,
-                            SmsService smsService,
-                            RedisPublisher redisPublisher) {
-        this.portManager = portManager;
-        this.readerService = readerService;
-        this.modemInitializer = modemInitializer;
-        this.indexDetector = indexDetector;
-        this.smsService = smsService;
-        this.redisPublisher = redisPublisher;
-    }
+    private ScheduledFuture<?> unreadPollFuture;
+    private final AtomicBoolean unreadPollInProgress = new AtomicBoolean(false);
 
     @Override
     public void run(ApplicationArguments args) throws Exception {
@@ -68,6 +66,10 @@ public class SmsReaderRuntime implements ApplicationRunner {
         pollThread = new Thread(this::pollLoop, "sms-poll-thread");
         pollThread.setDaemon(true);
         pollThread.start();
+
+        unreadPollFuture = taskScheduler.scheduleAtFixedRate(
+                this::scheduleUnreadPoll,
+                Duration.ofMillis(appConfig.getUnreadPollIntervalMs()));
 
         log.info("SMS reader runtime started.");
     }
@@ -103,6 +105,51 @@ public class SmsReaderRuntime implements ApplicationRunner {
         });
     }
 
+    private void scheduleUnreadPoll() {
+        if (!running) {
+            return;
+        }
+
+        if (!unreadPollInProgress.compareAndSet(false, true)) {
+            log.info("Skipping unread SMS schedule because the previous run is still queued/running.");
+            return;
+        }
+
+        try {
+            commandExecutor.submit(this::processScheduledUnreadSms);
+        } catch (Exception e) {
+            unreadPollInProgress.set(false);
+            log.warn("Could not submit unread SMS schedule: {}", e.getMessage());
+        }
+    }
+
+    private void processScheduledUnreadSms() {
+        try {
+            List<Integer> unreadIndexes = smsService.listUnreadIndexes();
+            if (unreadIndexes.isEmpty()) {
+                log.info("Scheduled unread SMS scan found no messages.");
+                return;
+            }
+
+            log.info("Scheduled unread SMS scan found indexes: {}", unreadIndexes);
+            for (int index : unreadIndexes) {
+                Optional<SmsMessage> msgOpt = smsService.readAndParse(index);
+                msgOpt.ifPresent(msg -> {
+                    try {
+                        redisPublisher.publishIfNewerThanCurrent(msg);
+                    } catch (Exception e) {
+                        log.error("Conditional Redis publish failed for scheduled SMS index={}: {}",
+                                index, e.getMessage(), e);
+                    }
+                });
+            }
+        } catch (Exception e) {
+            log.error("Scheduled unread SMS scan failed: {}", e.getMessage(), e);
+        } finally {
+            unreadPollInProgress.set(false);
+        }
+    }
+
     @PreDestroy
     public void shutdown() {
         if (!running && commandExecutor.isShutdown()) {
@@ -114,6 +161,10 @@ public class SmsReaderRuntime implements ApplicationRunner {
 
         if (pollThread != null) {
             pollThread.interrupt();
+        }
+
+        if (unreadPollFuture != null) {
+            unreadPollFuture.cancel(false);
         }
 
         commandExecutor.shutdown();

@@ -3,11 +3,14 @@ package com.example.sms.config;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
 @Validated
 @ConfigurationProperties(prefix = "sms")
+@Data
 public class AppConfig {
 
     @Valid
@@ -20,18 +23,6 @@ public class AppConfig {
     private final Behavior behavior = new Behavior();
 
     public enum RedisMode { LIST, PUBSUB }
-
-    public Serial getSerial() {
-        return serial;
-    }
-
-    public Redis getRedis() {
-        return redis;
-    }
-
-    public Behavior getBehavior() {
-        return behavior;
-    }
 
     public String getSerialPort() {
         return serial.getPort();
@@ -69,34 +60,24 @@ public class AppConfig {
         return behavior.isDeleteSmsAfterRead();
     }
 
+    public long getUnreadPollIntervalMs() {
+        return behavior.getUnreadPollIntervalMs();
+    }
+
     public int getRedisPublishRetries() {
         return redis.getPublishRetries();
     }
 
+    @Data
     public static class Serial {
         @NotBlank
         private String port;
 
         @Min(1)
         private int baudRate = 115200;
-
-        public String getPort() {
-            return port;
-        }
-
-        public void setPort(String port) {
-            this.port = port;
-        }
-
-        public int getBaudRate() {
-            return baudRate;
-        }
-
-        public void setBaudRate(int baudRate) {
-            this.baudRate = baudRate;
-        }
     }
 
+    @Data
     public static class Redis {
         @NotBlank
         private String host = "127.0.0.1";
@@ -116,73 +97,13 @@ public class AppConfig {
 
         @Min(1)
         private int publishRetries = 3;
-
-        public String getHost() {
-            return host;
-        }
-
-        public void setHost(String host) {
-            this.host = host;
-        }
-
-        public int getPort() {
-            return port;
-        }
-
-        public void setPort(int port) {
-            this.port = port;
-        }
-
-        public String getPassword() {
-            return password;
-        }
-
-        public void setPassword(String password) {
-            this.password = password;
-        }
-
-        public int getDatabase() {
-            return database;
-        }
-
-        public void setDatabase(int database) {
-            this.database = database;
-        }
-
-        public String getQueueName() {
-            return queueName;
-        }
-
-        public void setQueueName(String queueName) {
-            this.queueName = queueName;
-        }
-
-        public RedisMode getMode() {
-            return mode;
-        }
-
-        public void setMode(RedisMode mode) {
-            this.mode = mode;
-        }
-
-        public int getPublishRetries() {
-            return publishRetries;
-        }
-
-        public void setPublishRetries(int publishRetries) {
-            this.publishRetries = publishRetries;
-        }
     }
 
+    @Data
     public static class Behavior {
         private boolean deleteSmsAfterRead = false;
 
-        public boolean isDeleteSmsAfterRead() {
-            return deleteSmsAfterRead;
-        }
-
-        public void setDeleteSmsAfterRead(boolean deleteSmsAfterRead) {
-            this.deleteSmsAfterRead = deleteSmsAfterRead;
-        }
+        @Min(1000)
+        private long unreadPollIntervalMs = 60_000;
     }
 }

@@ -33,3 +33,4 @@ sms:
     publish-retries: ${REDIS_PUBLISH_RETRIES:3}
   behavior:
     delete-sms-after-read: ${DELETE_SMS_AFTER_READ:false}
+    unread-poll-interval-ms: ${UNREAD_POLL_INTERVAL_MS:60000}

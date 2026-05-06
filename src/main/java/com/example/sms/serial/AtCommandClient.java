@@ -2,6 +2,7 @@ package com.example.sms.serial;
 
 import com.example.sms.exception.ModemTimeoutException;
 import com.example.sms.exception.SerialPortException;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,19 +22,15 @@ import org.springframework.stereotype.Component;
  * populated by {@link SerialReaderService}.
  */
 @Component
+@RequiredArgsConstructor
 public class AtCommandClient {
 
     private static final Logger log = LoggerFactory.getLogger(AtCommandClient.class);
 
     private static final int DEFAULT_TIMEOUT_MS = 8_000;
 
-    private final OutputStream outputStream;
+    private final SerialPortManager portManager;
     private final RxBuffer     rxBuffer;
-
-    public AtCommandClient(SerialPortManager portManager, RxBuffer rxBuffer) {
-        this.outputStream = portManager.getOutputStream();
-        this.rxBuffer     = rxBuffer;
-    }
 
     // -------------------------------------------------------------------------
     // Public API
@@ -67,6 +64,7 @@ public class AtCommandClient {
      * Used internally and exposed for special cases (e.g. escape sequences).
      */
     public void sendRaw(String command) {
+        OutputStream outputStream = portManager.getOutputStream();
         if (outputStream == null) {
             throw new SerialPortException("Serial output stream is not available.");
         }

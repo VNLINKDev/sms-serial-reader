@@ -1,6 +1,7 @@
 package com.example.sms.modem;
 
 import com.example.sms.serial.RxBuffer;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -23,6 +24,7 @@ import org.springframework.stereotype.Component;
  * indexes.
  */
 @Component
+@RequiredArgsConstructor
 public class SmsIndexDetector {
 
     private static final Logger log = LoggerFactory.getLogger(SmsIndexDetector.class);
@@ -35,10 +37,6 @@ public class SmsIndexDetector {
             Pattern.compile("\\+CMTI:\\s*\"[^\"]+\",(\\d+)");
 
     private final RxBuffer rxBuffer;
-
-    public SmsIndexDetector(RxBuffer rxBuffer) {
-        this.rxBuffer = rxBuffer;
-    }
 
     /**
      * Scans buffered data for {@code +CMTI} notifications.

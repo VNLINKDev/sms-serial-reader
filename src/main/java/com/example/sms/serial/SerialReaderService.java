@@ -1,5 +1,6 @@
 package com.example.sms.serial;
 
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -15,20 +16,16 @@ import org.springframework.stereotype.Component;
  * from the wire to memory.
  */
 @Component
+@RequiredArgsConstructor
 public class SerialReaderService {
 
     private static final Logger log = LoggerFactory.getLogger(SerialReaderService.class);
 
-    private final InputStream inputStream;
+    private final SerialPortManager portManager;
     private final RxBuffer    rxBuffer;
 
     private volatile boolean running = false;
     private Thread            readerThread;
-
-    public SerialReaderService(SerialPortManager portManager, RxBuffer rxBuffer) {
-        this.inputStream = portManager.getInputStream();
-        this.rxBuffer    = rxBuffer;
-    }
 
     // -------------------------------------------------------------------------
     // Lifecycle
@@ -60,6 +57,7 @@ public class SerialReaderService {
     // -------------------------------------------------------------------------
 
     private void readLoop() {
+        InputStream inputStream = portManager.getInputStream();
         byte[] buf = new byte[1024];
 
         while (running) {

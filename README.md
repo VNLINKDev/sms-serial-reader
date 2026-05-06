@@ -74,6 +74,61 @@ GET /actuator/health
 GET /actuator/info
 ```
 
+## Running With Docker
+
+This project includes a multi-stage `Dockerfile` and `docker-compose.yml`.
+The compose file starts both Redis and the SMS reader service.
+
+1. Create a local environment file:
+
+```bash
+cp .env.example .env
+```
+
+2. On the host machine, find the GSM modem device:
+
+```bash
+ls -l /dev/ttyUSB* /dev/ttyACM*
+```
+
+3. Edit `.env` and set the serial device, for example:
+
+```env
+SERIAL_DEVICE=/dev/ttyUSB0
+SERIAL_PORT=/dev/ttyUSB0
+```
+
+4. Build and start:
+
+```bash
+docker compose up -d --build
+```
+
+5. Check logs and health:
+
+```bash
+docker compose logs -f sms-reader
+curl http://localhost:8080/actuator/health
+```
+
+6. Stop the stack:
+
+```bash
+docker compose down
+```
+
+Docker notes:
+
+- `SERIAL_PORT=COM9` is for running directly on Windows. Inside a Linux
+  container, use a Linux device path such as `/dev/ttyUSB0`.
+- If the container cannot open the modem device due to permissions, either
+  add the deployment user to the host `dialout` group or add `privileged: true`
+  to the `sms-reader` service in `docker-compose.yml`.
+- Docker Desktop on Windows does not expose normal `COM` ports to Linux
+  containers directly. Deploy on Linux, or expose the USB modem through WSL2
+  first and use the WSL device path.
+- Application logs are mounted to `./logs` on the host.
+
 ## Redis Message Format
 
 Every received SMS is published as JSON:

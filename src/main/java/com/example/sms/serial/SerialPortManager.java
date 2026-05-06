@@ -4,6 +4,7 @@ import com.example.sms.exception.SerialPortException;
 import com.example.sms.config.AppConfig;
 import com.fazecast.jSerialComm.SerialPort;
 import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -18,6 +19,7 @@ import java.util.stream.Collectors;
  * expose streams, and close.  All higher-level concerns live elsewhere.
  */
 @Component
+@RequiredArgsConstructor
 public class SerialPortManager implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(SerialPortManager.class);
@@ -25,17 +27,11 @@ public class SerialPortManager implements AutoCloseable {
     private static final int READ_TIMEOUT_MS  = 5_000;
     private static final int WRITE_TIMEOUT_MS = 1_000;
 
-    private final String portName;
-    private final int    baudRate;
+    private final AppConfig config;
 
     private SerialPort   port;
     private InputStream  inputStream;
     private OutputStream outputStream;
-
-    public SerialPortManager(AppConfig config) {
-        this.portName = config.getSerialPort();
-        this.baudRate = config.getBaudRate();
-    }
 
     // -------------------------------------------------------------------------
     // Lifecycle
@@ -47,6 +43,8 @@ public class SerialPortManager implements AutoCloseable {
      * @throws SerialPortException if the port cannot be opened.
      */
     public void open() {
+        String portName = config.getSerialPort();
+        int baudRate = config.getBaudRate();
         log.info("Opening serial port {} @ {} baud. Available ports: {}",
                 portName, baudRate, listAvailablePorts());
 
@@ -84,7 +82,7 @@ public class SerialPortManager implements AutoCloseable {
 
         if (port != null && port.isOpen()) {
             port.closePort();
-            log.info("Serial port {} closed.", portName);
+            log.info("Serial port {} closed.", config.getSerialPort());
         }
     }
 

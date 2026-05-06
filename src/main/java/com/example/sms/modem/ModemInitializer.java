@@ -1,6 +1,7 @@
 package com.example.sms.modem;
 
 import com.example.sms.serial.AtCommandClient;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -10,15 +11,12 @@ import org.springframework.stereotype.Component;
  * into a known, ready state.
  */
 @Component
+@RequiredArgsConstructor
 public class ModemInitializer {
 
     private static final Logger log = LoggerFactory.getLogger(ModemInitializer.class);
 
     private final AtCommandClient atClient;
-
-    public ModemInitializer(AtCommandClient atClient) {
-        this.atClient = atClient;
-    }
 
     /**
      * Runs the full initialisation sequence.  Throws on any modem error or
