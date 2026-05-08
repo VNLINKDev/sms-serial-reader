@@ -15,12 +15,18 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Điều phối việc đọc SMS theo chỉ số bộ nhớ:
+ * Service nghiệp vụ đọc SMS từ modem theo chỉ số bộ nhớ và chuyển thành
+ * {@link SmsMessage}.
+ *
+ * Class này là lớp duy nhất biết flow AT command cho SMS:
  * <ol>
- *   <li>Gửi {@code AT+CMGR=index} qua AT client.</li>
- *   <li>Phân tích phản hồi bằng {@link SmsParser}.</li>
- *   <li>Tùy chọn xóa SMS khỏi bộ nhớ modem.</li>
+ *   Gửi {@code AT+CMGR=index} qua AT client.
+ *   Phân tích phản hồi bằng {@link SmsParser}.
+ *   Tùy chọn xóa SMS khỏi bộ nhớ modem.
  * </ol>
+ *
+ * Không xử lý Redis tại đây để giữ boundary rõ ràng: đọc/parse SMS thuộc
+ * modem domain, còn delivery sang Redis thuộc integration adapter.
  */
 @Service
 @RequiredArgsConstructor
@@ -35,6 +41,10 @@ public class SmsService {
 
     /**
      * Đọc và phân tích SMS tại chỉ số bộ nhớ modem được truyền vào.
+     *
+     * Method trả về {@link Optional#empty()} khi lỗi để runtime có thể tiếp tục
+     * xử lý các SMS khác. Đây là lựa chọn vận hành: một SMS lỗi không được làm
+     * dừng toàn bộ reader process.
      *
      * @param index chỉ số bộ nhớ modem từ thông báo +CMTI.
      * @return {@link Optional} chứa tin nhắn đã phân tích, hoặc rỗng nếu đọc thất bại.
@@ -67,6 +77,9 @@ public class SmsService {
 
     /**
      * Liệt kê các chỉ số bộ nhớ SMS chưa đọc từ modem.
+     *
+     * Được dùng bởi scheduled recovery flow để xử lý SMS còn sót nếu event
+     * {@code +CMTI} bị mất hoặc process restart trước khi đọc xong.
      */
     public List<Integer> listUnreadIndexes() {
         String response = atClient.sendAndWait("AT+CMGL=\"REC UNREAD\"");
@@ -83,6 +96,10 @@ public class SmsService {
     
     /**
      * Xóa SMS tại chỉ số được chỉ định khỏi bộ nhớ modem.
+     *
+     * Xóa là best-effort vì failure ở bước cleanup không nên làm mất kết quả
+     * đã parse/publish. Nếu modem từ chối xóa, scheduled unread scan có thể thấy
+     * lại SMS này và tầng Redis sẽ chịu trách nhiệm chống ghi đè dữ liệu cũ.
      */
     public void deleteSms(int index) {
         try {

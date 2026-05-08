@@ -11,6 +11,18 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
 
+/**
+ * Parser chuyển raw response của lệnh {@code AT+CMGR} thành domain model
+ * {@link SmsMessage}.
+ *
+ * Parser chỉ chấp nhận format SMS nghiệp vụ hiện tại: body phải chứa mã giao
+ * dịch và OTP. Nếu thiếu header hoặc không trích xuất được OTP, method ném
+ * {@link SmsParseException} để caller quyết định retry/log theo index SMS.
+ *
+ * Edge case: timestamp modem có thể thiếu hoặc sai format. Khi đó parser dùng
+ * thời điểm hiện tại để không làm rơi message, nhưng log/monitoring phía trên nên
+ * theo dõi tỷ lệ parse fallback nếu cần độ chính xác thời gian cao.
+ */
 @Component
 public class SmsParser {
 
@@ -26,6 +38,13 @@ public class SmsParser {
             "Ma\\s+giao\\s+dich\\s+(\\d+).*?OTP\\s*:?\\s*(\\d+)",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
 
+    /**
+     * Parse response đầy đủ của {@code AT+CMGR=index}.
+     *
+     * Flow xử lý: tìm header {@code +CMGR}, lấy timestamp từ header, gom các
+     * dòng body cho đến terminal response {@code OK}/{@code ERROR}, sau đó trích
+     * transactionId và OTP bằng regex nghiệp vụ.
+     */
     public SmsMessage parse(int index, String rawResponse) {
 
         String[] lines = rawResponse.split("\\r?\\n");
@@ -52,7 +71,7 @@ public class SmsParser {
 
         String tsRaw = headerMatcher.group(3);
 
-        // ===== nội dung =====
+        // Body có thể nhiều dòng; terminal line không thuộc nội dung SMS.
         StringBuilder bodyBuilder = new StringBuilder();
         for (int i = headerIndex + 1; i < lines.length; i++) {
             String line = lines[i];
@@ -65,7 +84,6 @@ public class SmsParser {
 
         String body = bodyBuilder.toString().trim();
 
-        // ===== trích xuất OTP =====
         Matcher otpMatcher = OTP_PATTERN.matcher(body);
 
         if (!otpMatcher.find()) {
@@ -80,6 +98,13 @@ public class SmsParser {
         return new SmsMessage(index, transactionId, otp, timestamp);
     }
 
+    /**
+     * Parse timestamp chuẩn GSM dạng {@code yy/MM/dd,HH:mm:ss+tz}.
+     *
+     * Timezone trong SMS là số quarter-hour, nên cần nhân 15 phút để ra offset
+     * giây. Fallback về {@link OffsetDateTime#now()} là lựa chọn có chủ đích để
+     * giữ message trong pipeline khi modem trả timestamp không chuẩn.
+     */
     private OffsetDateTime parseTimestamp(String tsRaw) {
 
         if (tsRaw == null || tsRaw.isBlank()) {

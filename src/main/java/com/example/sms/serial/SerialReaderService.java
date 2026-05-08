@@ -9,11 +9,15 @@ import java.nio.charset.StandardCharsets;
 import org.springframework.stereotype.Component;
 
 /**
- * Liên tục đọc byte thô từ {@link InputStream} serial trên một daemon thread
- * riêng và thêm vào {@link RxBuffer} dùng chung.
+ * Service đọc byte thô từ serial port trên một daemon thread riêng và nạp vào
+ * {@link RxBuffer}.
  *
- * <p>Lớp này cố ý không chứa logic modem hoặc SMS; nó chỉ chuyển byte từ đường
- * truyền vào bộ nhớ.
+ * Lớp này là boundary I/O thấp nhất của ứng dụng: không parse modem command,
+ * không hiểu SMS, không publish Redis. Tách trách nhiệm như vậy giúp giữ read
+ * loop đơn giản và giảm nguy cơ block serial reader bởi business logic.
+ *
+ * {@code running} là volatile để shutdown thread khác có thể báo dừng mà
+ * reader thread nhìn thấy ngay cả khi không đi qua synchronized block.
  */
 @Component
 @RequiredArgsConstructor
@@ -31,7 +35,12 @@ public class SerialReaderService {
     // Vòng đời
     // -------------------------------------------------------------------------
 
-    /** Khởi động luồng đọc nền. */
+    /**
+     * Khởi động reader thread nền.
+     *
+     * Thread là daemon để JVM không bị giữ lại nếu Spring context shutdown
+     * trong tình huống lỗi startup. Lifecycle bình thường vẫn gọi {@link #stop()}.
+     */
     public void start() {
         running      = true;
         readerThread = new Thread(this::readLoop, "sms-serial-reader");
@@ -40,7 +49,12 @@ public class SerialReaderService {
         log.info("Serial reader thread started.");
     }
 
-    /** Báo hiệu dừng luồng đọc và đánh thức các luồng đang chờ. */
+    /**
+     * Báo dừng reader thread và đánh thức các command đang wait trên buffer.
+     *
+     * Interrupt giúp thoát khỏi blocking read nếu driver hỗ trợ; wakeAll giúp
+     * các thread chờ response không nằm im đến hết timeout trong quá trình shutdown.
+     */
     public void stop() {
         running = false;
         rxBuffer.wakeAll();
@@ -72,6 +86,7 @@ public class SerialReaderService {
                 if (!running) break;
                 if (isReadTimeout(e)) continue;
 
+                // NOTE: Lỗi đọc serial thường là lỗi thiết bị/driver; dừng loop để tránh log spam vô hạn.
                 log.error("Error reading from serial port: {}", e.getMessage(), e);
                 break;
             }

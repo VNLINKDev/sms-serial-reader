@@ -15,8 +15,12 @@ import java.util.Arrays;
 import java.util.stream.Collectors;
 
 /**
- * Chỉ chịu trách nhiệm vòng đời của {@link SerialPort}: mở, cấu hình,
- * cung cấp luồng dữ liệu và đóng. Các xử lý cấp cao hơn nằm ở lớp khác.
+ * Quản lý lifecycle của {@link SerialPort}: chọn port theo cấu hình, mở port,
+ * cấu hình thông số truyền, expose input/output stream và đóng tài nguyên.
+ *
+ * Bean được mở ở {@link PostConstruct} để application fail fast nếu modem
+ * hoặc quyền truy cập serial không sẵn sàng. Các lớp cao hơn chỉ làm việc với
+ * stream đã được kiểm tra trạng thái, không tự mở/đóng port.
  */
 @Component
 @RequiredArgsConstructor
@@ -39,6 +43,10 @@ public class SerialPortManager implements AutoCloseable {
 
     /**
      * Mở và cấu hình cổng serial.
+     *
+     * DTR/RTS được bật để tương thích với nhiều modem USB cần tín hiệu control
+     * line trước khi phản hồi AT command. Timeout read ở chế độ semi-blocking để
+     * reader thread có thể định kỳ kiểm tra cờ shutdown.
      *
      * @throws SerialPortException nếu không mở được cổng.
      */
@@ -75,6 +83,10 @@ public class SerialPortManager implements AutoCloseable {
         open();
     }
 
+    /**
+     * Đóng stream trước rồi mới đóng port vật lý để driver có cơ hội flush/giải
+     * phóng handle theo thứ tự ổn định.
+     */
     @Override
     public void close() {
         if (inputStream != null)  closeQuietly(inputStream);

@@ -6,12 +6,17 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Bộ đệm nhận an toàn luồng để tích lũy byte thô từ cổng serial.
+ * Bộ đệm nhận dùng chung giữa thread đọc serial và thread gửi AT command.
  *
- * <p>Bộ đệm tự động cắt bớt khi vượt quá {@link #MAX_SIZE} byte, giữ lại
- * {@link #KEEP_TAIL} byte mới nhất. Bộ đếm offset tuyệt đối theo dõi số byte
- * đã bị tiêu thụ từ khi tạo bộ đệm, để các luồng đang chờ vẫn tham chiếu đúng
- * vị trí ngay cả sau khi cắt bớt.
+ * Toàn bộ state mutable được bảo vệ bằng monitor của instance
+ * ({@code synchronized}). Điều này tránh race giữa {@link #append(String)} đang
+ * thêm byte mới và {@link #waitForTerminatedResponse(long, int, String)} đang
+ * chờ terminal response.
+ *
+ * Bộ đệm có giới hạn kích thước để tránh memory leak nếu modem gửi dữ liệu
+ * nhiễu hoặc application không drain kịp. {@code baseOffset} giữ offset tuyệt
+ * đối của phần đã bị cắt, nhờ đó command đang chờ vẫn có thể tính lại vị trí
+ * tương đối sau khi buffer bị trim.
  */
 @Component
 public class RxBuffer {
@@ -28,7 +33,13 @@ public class RxBuffer {
     // Phía ghi (luồng đọc serial)
     // -------------------------------------------------------------------------
 
-    /** Thêm dữ liệu mới nhận và thông báo cho các luồng đang chờ. */
+    /**
+     * Thêm dữ liệu mới từ serial reader và đánh thức các command đang chờ.
+     *
+     * notifyAll được dùng thay vì notify vì có thể có nhiều luồng đang chờ
+     * shutdown hoặc response khác nhau trong tương lai; đánh thức tất cả giúp
+     * tránh missed signal khi điều kiện chờ thay đổi.
+     */
     public synchronized void append(String data) {
         buffer.append(data);
 
@@ -58,6 +69,11 @@ public class RxBuffer {
     /**
      * Chặn cho đến khi phản hồi kết thúc (OK / ERROR) xuất hiện tại hoặc sau
      * {@code startAbsoluteOffset}, hoặc đến khi hết {@code timeoutMs}.
+     *
+     * Vòng lặp chờ luôn kiểm tra lại điều kiện sau mỗi lần wake-up để an toàn
+     * với spurious wakeup. Khi buffer đã bị trim qua offset ban đầu, method bắt
+     * đầu từ phần còn lại gần nhất thay vì fail ngay, giúp hệ thống chịu được
+     * burst dữ liệu trong giới hạn hợp lý.
      *
      * @throws ModemTimeoutException khi hết thời gian chờ.
      */
@@ -98,6 +114,9 @@ public class RxBuffer {
      * Trả về ảnh chụp nội dung bộ đệm thô và xóa mọi dữ liệu đến offset tuyệt đối
      * được truyền vào. Được {@link com.example.sms.modem.SmsIndexDetector} dùng
      * để xả nội dung đã xử lý.
+     *
+     * Caller phải truyền offset đã tính từ cùng snapshot logic. Nếu không,
+     * risk là drain nhầm dữ liệu mới được append sau khi scan.
      */
     public synchronized String drainUpTo(long absoluteOffset) {
         long localEnd = absoluteOffset - baseOffset;

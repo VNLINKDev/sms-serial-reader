@@ -26,16 +26,15 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Đẩy các đối tượng {@link SmsMessage} đã phân tích sang Redis.
+ * Integration adapter chịu trách nhiệm chuyển {@link SmsMessage} đã parse thành
+ * JSON và đưa sang Redis.
  *
- * <p>Hỗ trợ hai chế độ được điều khiển bởi {@link AppConfig.RedisMode}:
- * <ul>
- *   <li>{@code VALUE} lưu chuỗi JSON mới nhất vào Redis bằng SET.</li>
- *   <li>{@code PUBSUB} phát chuỗi JSON lên kênh Redis bằng PUBLISH.</li>
- * </ul>
- *
- * <p>Các lần gửi thất bại được thử lại tối đa {@code maxRetries} lần với
- * backoff lũy thừa trước khi ném {@link RedisPublishException}.
+ * Service hỗ trợ hai kiểu delivery:
+ * 
+ *   {@code VALUE}: ghi SMS mới nhất vào một Redis key bằng SET. Mode này phù
+ *       hợp với consumer cần đọc trạng thái hiện tại và cho phép flow recovery
+ *       so sánh timestamp để tránh ghi đè dữ liệu mới.
+ *   {@code LIST}: lưu tất cả SMS vào một list, phù hợp với consumer cần đọc toàn bộ SMS.
  */
 @Component
 @RequiredArgsConstructor
@@ -54,9 +53,16 @@ public class RedisPublisher implements AutoCloseable {
     private RedisCommands<String, String>  commands;
 
     // -------------------------------------------------------------------------
-    // Vòng đời
+    // Vòng đời Redis connection
     // -------------------------------------------------------------------------
 
+    /**
+     * Tạo Redis client/connection từ cấu hình runtime.
+     *
+     * Timeout kết nối được đặt hữu hạn để startup hoặc reconnect lỗi không
+     * treo vô thời hạn. Nếu Redis không sẵn sàng ở startup, ứng dụng fail fast
+     * thay vì chạy nhưng không publish được SMS.
+     */
     public void connect() {
         RedisURI.Builder uriBuilder = RedisURI.builder()
                 .withHost(config.getRedisHost())
@@ -81,6 +87,12 @@ public class RedisPublisher implements AutoCloseable {
         connect();
     }
 
+    /**
+     * Đóng connection trước khi bean bị destroy.
+     *
+     * NOTE: Method này intentionally idempotent ở mức null-check để an toàn
+     * khi Spring shutdown sau một lỗi startup một phần.
+     */
     @Override
     @PreDestroy
     public void close() {
@@ -94,7 +106,11 @@ public class RedisPublisher implements AutoCloseable {
     // -------------------------------------------------------------------------
 
     /**
-     * Chuyển {@code message} thành JSON rồi ghi hoặc phát sang Redis.
+     * Publish SMS theo mode cấu hình.
+     *
+     * Flow realtime ưu tiên độ đơn giản: serialize payload, gửi Redis, retry
+     * với backoff lũy thừa nếu lỗi tạm thời. Sau khi hết retry, exception được
+     * ném để runtime log lỗi theo index SMS, giúp vận hành truy vết message bị lỗi.
      *
      * @throws RedisPublishException nếu tất cả lần thử đều thất bại.
      */
@@ -107,9 +123,9 @@ public class RedisPublisher implements AutoCloseable {
 
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                if (config.getRedisMode() == AppConfig.RedisMode.PUBSUB) {
-                    commands.publish(target, json);
-                    log.info("Published SMS index={} to channel '{}'.", message.getIndex(), target);
+                if (config.getRedisMode() == AppConfig.RedisMode.LIST) {
+                    commands.rpush(target, json);
+                    log.info("Pushed SMS index={} to list '{}'.", message.getIndex(), target);
                 } else {
                     commands.set(target, json);
                     log.info("Set SMS index={} to key '{}'.", message.getIndex(), target);
@@ -132,11 +148,24 @@ public class RedisPublisher implements AutoCloseable {
     }
 
     /**
-     * Chỉ lưu SMS quét theo lịch nếu nó mới hơn giá trị hiện tại trong Redis.
+     * Ghi SMS từ flow recovery chỉ khi dữ liệu mới hơn state hiện tại.
+     *
+     * Dùng Redis WATCH/MULTI/EXEC để tránh race condition: nếu một SMS realtime
+     * mới hơn được ghi vào cùng key trong lúc scheduler đang compare, EXEC sẽ bị
+     * discard và method retry. Điều kiện mới hơn dựa trên timestamp, tie-breaker
+     * bằng modem index để có thứ tự ổn định khi timestamp bằng nhau.
+     *
+     * NOTE: Transaction Redis đang dùng connection singleton. Nếu sau này có
+     * nhiều writer gọi trực tiếp adapter này song song, cần synchronize đoạn
+     * WATCH/MULTI/EXEC hoặc dùng connection riêng cho transaction để tránh command
+     * từ flow khác xen vào cùng connection.
+     *
+     * Edge case: nếu payload hiện tại trong Redis không parse được, method cho
+     * phép overwrite để service tự phục hồi khỏi dữ liệu cũ/sai schema.
      */
     public boolean publishIfNewerThanCurrent(SmsMessage candidate) {
-        if (config.getRedisMode() == AppConfig.RedisMode.PUBSUB) {
-            log.warn("Skipping conditional Redis save for SMS index={} because PUBSUB mode has no stored latest value.",
+        if (config.getRedisMode() == AppConfig.RedisMode.LIST) {
+            log.warn("Skipping conditional Redis save for SMS index={} because LIST mode has no stored latest value.",
                     candidate.getIndex());
             return false;
         }

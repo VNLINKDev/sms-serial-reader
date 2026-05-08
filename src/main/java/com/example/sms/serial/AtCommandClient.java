@@ -11,14 +11,16 @@ import java.nio.charset.StandardCharsets;
 import org.springframework.stereotype.Component;
 
 /**
- * Thành phần gửi lệnh an toàn luồng để gửi lệnh AT tới modem GSM và chờ phản hồi.
+ * Gateway cấp thấp để gửi AT command tới modem GSM qua serial port.
  *
- * <p>Mọi lần gửi lệnh PHẢI được tuần tự hóa qua executor một luồng để tránh
- * ghi xen kẽ vào modem. Bên gọi chịu trách nhiệm tuần tự hóa; lớp này chỉ xử lý
- * việc gửi byte và khớp phản hồi.
+ * Lớp này không tự tạo lock ở cấp command vì runtime đã serialize tất cả
+ * modem command qua single-thread executor. Ranh giới trách nhiệm ở đây là:
+ * lấy offset hiện tại của {@link RxBuffer}, ghi command xuống output stream,
+ * rồi chờ phần response xuất hiện sau offset đó.
  *
- * <p>Việc khớp phản hồi được giao cho {@link RxBuffer} dùng chung, nơi được
- * {@link SerialReaderService} nạp dữ liệu.
+ * NOTE: Nếu caller gọi class này đồng thời từ nhiều thread, response có thể
+ * bị match sai vì modem không gắn correlation id cho từng command. Luôn gọi qua
+ * executor tuần tự ở tầng orchestration.
  */
 @Component
 @RequiredArgsConstructor
@@ -47,7 +49,10 @@ public class AtCommandClient {
     }
 
     /**
-     * Gửi {@code command} và chờ tối đa {@code timeoutMs} để nhận phản hồi kết thúc.
+     * Gửi {@code command} và chờ response kết thúc sau offset hiện tại của buffer.
+     *
+     * Offset được lấy trước khi ghi command để bỏ qua dữ liệu cũ còn trong
+     * buffer, đồng thời vẫn nhận được toàn bộ response phát sinh sau command.
      */
     public String sendAndWait(String command, int timeoutMs) {
         long startAbsolute = rxBuffer.currentAbsoluteOffset();
@@ -59,7 +64,10 @@ public class AtCommandClient {
 
     /**
      * Gửi lệnh AT thô mà không chờ phản hồi.
-     * Dùng nội bộ và mở ra cho các trường hợp đặc biệt (ví dụ chuỗi escape).
+     *
+     * Dùng nội bộ bởi {@link #sendAndWait(String, int)} và mở ra cho các
+     * trường hợp đặc biệt như escape sequence. Method này chỉ đảm bảo flush byte
+     * xuống stream, không xác nhận modem đã xử lý command.
      */
     public void sendRaw(String command) {
         OutputStream outputStream = portManager.getOutputStream();

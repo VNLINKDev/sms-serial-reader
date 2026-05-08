@@ -35,7 +35,7 @@ class AppConfigTest {
                     assertThat(config.getRedisPort()).isEqualTo(6380);
                     assertThat(config.getRedisDatabase()).isEqualTo(2);
                     assertThat(config.getRedisQueueName()).isEqualTo("sms:test");
-                    assertThat(config.getRedisMode()).isEqualTo(AppConfig.RedisMode.PUBSUB);
+                    assertThat(config.getRedisMode()).isEqualTo(AppConfig.RedisMode.LIST);
                     assertThat(config.getRedisPublishRetries()).isEqualTo(5);
                     assertThat(config.isDeleteSmsAfterRead()).isTrue();
                 });

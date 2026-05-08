@@ -8,6 +8,10 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
+/**
+ * Cấu hình nghiệp vụ của service, được bind từ prefix {@code sms.*}.
+ *
+ */
 @Validated
 @ConfigurationProperties(prefix = "sms")
 @Data
@@ -22,7 +26,12 @@ public class AppConfig {
     @Valid
     private final Behavior behavior = new Behavior();
 
-    public enum RedisMode { VALUE, PUBSUB }
+    /**
+     * Chế độ ghi Redis:
+     * {@code VALUE} lưu trạng thái SMS mới nhất vào một key, phù hợp consumer đọc latest state.
+     * {@code LIST} lưu tất cả SMS vào một list, phù hợp consumer cần đọc toàn bộ SMS.
+     */
+    public enum RedisMode { VALUE, LIST }
 
     public String getSerialPort() {
         return serial.getPort();
@@ -68,6 +77,7 @@ public class AppConfig {
         return redis.getPublishRetries();
     }
 
+    /** Cấu hình kết nối serial tới modem GSM. */
     @Data
     public static class Serial {
         @NotBlank
@@ -77,6 +87,7 @@ public class AppConfig {
         private int baudRate = 115200;
     }
 
+    /** Cấu hình Redis và cách publish payload SMS đã parse. */
     @Data
     public static class Redis {
         @NotBlank
@@ -99,6 +110,7 @@ public class AppConfig {
         private int publishRetries = 3;
     }
 
+    /** Cấu hình hành vi xử lý SMS sau khi đọc và lịch recovery. */
     @Data
     public static class Behavior {
         private boolean deleteSmsAfterRead = false;

@@ -15,12 +15,15 @@ import org.springframework.stereotype.Component;
  * Quét {@link RxBuffer} dùng chung để tìm mã kết quả tự phát {@code +CMTI}
  * và trích xuất các chỉ số bộ nhớ SMS do modem báo về.
  *
- * <p>Ví dụ thông báo:
+ * Ví dụ thông báo:
  * <pre>+CMTI: "SM",12</pre>
  *
- * <p>{@link #detect()} được thiết kế để gọi mỗi khi có dữ liệu mới được thêm
- * vào buffer. Lớp này không giữ trạng thái ngoài tham chiếu buffer, nên an toàn
- * luồng miễn là caller xử lý tuần tự các chỉ số trả về.
+ * {@link #detect()} được gọi từ polling thread và chỉ làm nhiệm vụ tách event
+ * notification khỏi raw stream. Sau khi match, phần buffer đã xử lý được drain
+ * để tránh đọc lại cùng một index trong vòng polling sau.
+ *
+ * NOTE: Detector chỉ parse notification, không đọc SMS. Việc đọc nội dung
+ * phải được đưa qua executor tuần tự để không cạnh tranh với AT command khác.
  */
 @Component
 @RequiredArgsConstructor
@@ -38,7 +41,11 @@ public class SmsIndexDetector {
     private final RxBuffer rxBuffer;
 
     /**
-     * Quét dữ liệu trong buffer để tìm thông báo {@code +CMTI}.
+     * Quét dữ liệu hiện có trong buffer để tìm thông báo {@code +CMTI}.
+     *
+     * Khối synchronized đảm bảo snapshot và absolute offset nhất quán với nhau.
+     * Nếu lấy hai giá trị này ở hai thời điểm khác nhau, phần drain có thể xóa
+     * sai đoạn dữ liệu khi serial reader append thêm byte giữa chừng.
      *
      * @return danh sách chỉ số SMS tìm được (có thể rỗng, không bao giờ null).
      */

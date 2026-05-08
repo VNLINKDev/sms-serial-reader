@@ -9,6 +9,10 @@ import org.springframework.stereotype.Component;
 /**
  * Gửi chuỗi lệnh AT khởi tạo chuẩn để đưa modem về trạng thái đã biết
  * và sẵn sàng hoạt động.
+ *
+ * Bean này không tự chạy khi khởi tạo Spring context; {@link
+ * com.example.sms.app.SmsReaderRuntime} gọi nó sau khi serial reader đã start
+ * để bảo đảm response init không bị mất khỏi buffer.
  */
 @Component
 @RequiredArgsConstructor
@@ -19,8 +23,12 @@ public class ModemInitializer {
     private final AtCommandClient atClient;
 
     /**
-     * Chạy toàn bộ chuỗi khởi tạo. Ném lỗi khi modem báo lỗi hoặc hết thời gian
-     * chờ để ứng dụng dừng sớm nếu modem không phản hồi đúng cách.
+     * Chạy toàn bộ chuỗi init theo thứ tự phụ thuộc.
+     *
+     * Các lệnh đầu tiên xác nhận đường truyền và tắt echo để response dễ parse.
+     * Sau đó modem được đưa vào SMS text mode, charset GSM và bật notification
+     * {@code +CMTI}. Nếu bất kỳ command nào timeout/lỗi, exception được bubble up
+     * để application fail fast thay vì chạy ở trạng thái modem chưa xác định.
      */
     public void initialize() {
         log.info("Initialising modem...");

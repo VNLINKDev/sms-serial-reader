@@ -7,6 +7,12 @@ import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.stereotype.Component;
 
+/**
+ * Health indicator phản ánh trạng thái mở/đóng của serial port đang cấu hình.
+ *
+ * Check này giúp vận hành phát hiện modem bị disconnect hoặc port không mở.
+ * Nó không gửi AT command chủ động để tránh cạnh tranh với command executor.
+ */
 @Component
 @RequiredArgsConstructor
 public class SerialPortHealthIndicator implements HealthIndicator {
