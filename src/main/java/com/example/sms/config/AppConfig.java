@@ -22,7 +22,7 @@ public class AppConfig {
     @Valid
     private final Behavior behavior = new Behavior();
 
-    public enum RedisMode { LIST, PUBSUB }
+    public enum RedisMode { VALUE, PUBSUB }
 
     public String getSerialPort() {
         return serial.getPort();
@@ -93,7 +93,7 @@ public class AppConfig {
         @NotBlank
         private String queueName = "sms:incoming";
 
-        private RedisMode mode = RedisMode.LIST;
+        private RedisMode mode = RedisMode.VALUE;
 
         @Min(1)
         private int publishRetries = 3;

@@ -7,8 +7,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Sends the standard sequence of initialisation AT commands to put the modem
- * into a known, ready state.
+ * Gửi chuỗi lệnh AT khởi tạo chuẩn để đưa modem về trạng thái đã biết
+ * và sẵn sàng hoạt động.
  */
 @Component
 @RequiredArgsConstructor
@@ -19,20 +19,19 @@ public class ModemInitializer {
     private final AtCommandClient atClient;
 
     /**
-     * Runs the full initialisation sequence.  Throws on any modem error or
-     * timeout so the application fails fast if the modem is not responding
-     * correctly.
+     * Chạy toàn bộ chuỗi khởi tạo. Ném lỗi khi modem báo lỗi hoặc hết thời gian
+     * chờ để ứng dụng dừng sớm nếu modem không phản hồi đúng cách.
      */
     public void initialize() {
         log.info("Initialising modem...");
 
-        send("AT");                        // basic comms check
-        send("ATE0");                      // disable command echo
-        send("AT+CMGF=1");                 // text mode
-        send("AT+CSCS=\"GSM\"");           // GSM character set
-        send("AT+CNMI=2,1,0,0,0");        // new SMS notification via +CMTI
-        send("AT+CPIN?");                  // SIM card status
-        send("AT+CSQ");                    // signal quality
+        send("AT");                        // kiểm tra kết nối cơ bản
+        send("ATE0");                      // tắt echo lệnh
+        send("AT+CMGF=1");                 // chế độ text
+        send("AT+CSCS=\"GSM\"");           // bộ ký tự GSM
+        send("AT+CNMI=2,1,0,0,0");        // thông báo SMS mới qua +CMTI
+        send("AT+CPIN?");                  // trạng thái SIM
+        send("AT+CSQ");                    // chất lượng tín hiệu
 
         log.info("Modem initialised successfully. Waiting for incoming SMS...");
     }

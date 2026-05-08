@@ -52,7 +52,7 @@ public class SmsParser {
 
         String tsRaw = headerMatcher.group(3);
 
-        // ===== body =====
+        // ===== nội dung =====
         StringBuilder bodyBuilder = new StringBuilder();
         for (int i = headerIndex + 1; i < lines.length; i++) {
             String line = lines[i];
@@ -65,7 +65,7 @@ public class SmsParser {
 
         String body = bodyBuilder.toString().trim();
 
-        // ===== extract OTP =====
+        // ===== trích xuất OTP =====
         Matcher otpMatcher = OTP_PATTERN.matcher(body);
 
         if (!otpMatcher.find()) {

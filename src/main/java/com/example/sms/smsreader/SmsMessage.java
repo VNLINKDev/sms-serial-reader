@@ -6,7 +6,7 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 
 /**
- * Minimal SMS model: only required fields
+ * Model SMS tối giản: chỉ gồm các trường bắt buộc.
  */
 @Data
 @RequiredArgsConstructor

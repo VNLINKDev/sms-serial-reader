@@ -6,12 +6,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Thread-safe receive buffer that accumulates raw bytes from the serial port.
+ * Bộ đệm nhận an toàn luồng để tích lũy byte thô từ cổng serial.
  *
- * <p>The buffer is automatically trimmed when it exceeds {@link #MAX_SIZE} bytes,
- * keeping the most recent {@link #KEEP_TAIL} bytes.  An absolute offset counter
- * tracks how many bytes have been consumed since the buffer was created, so
- * waiting threads can correctly reference positions even after trimming.
+ * <p>Bộ đệm tự động cắt bớt khi vượt quá {@link #MAX_SIZE} byte, giữ lại
+ * {@link #KEEP_TAIL} byte mới nhất. Bộ đếm offset tuyệt đối theo dõi số byte
+ * đã bị tiêu thụ từ khi tạo bộ đệm, để các luồng đang chờ vẫn tham chiếu đúng
+ * vị trí ngay cả sau khi cắt bớt.
  */
 @Component
 public class RxBuffer {
@@ -22,13 +22,13 @@ public class RxBuffer {
     private static final int KEEP_TAIL = 2_000;
 
     private final StringBuilder buffer     = new StringBuilder();
-    private long                baseOffset = 0;   // bytes trimmed away so far
+    private long                baseOffset = 0;   // số byte đã bị cắt bỏ
 
     // -------------------------------------------------------------------------
-    // Writer side (serial reader thread)
+    // Phía ghi (luồng đọc serial)
     // -------------------------------------------------------------------------
 
-    /** Appends newly received data and notifies waiting threads. */
+    /** Thêm dữ liệu mới nhận và thông báo cho các luồng đang chờ. */
     public synchronized void append(String data) {
         buffer.append(data);
 
@@ -43,23 +43,23 @@ public class RxBuffer {
     }
 
     // -------------------------------------------------------------------------
-    // Reader side (command thread)
+    // Phía đọc (luồng lệnh)
     // -------------------------------------------------------------------------
 
     /**
-     * Returns the absolute offset that the next byte appended will occupy.
-     * Callers should capture this <em>before</em> sending an AT command so they
-     * can later ask for only the response that appeared after the command.
+     * Trả về offset tuyệt đối mà byte tiếp theo được thêm vào sẽ chiếm.
+     * Bên gọi nên lấy giá trị này <em>trước</em> khi gửi lệnh AT để sau đó chỉ
+     * lấy phần phản hồi xuất hiện sau lệnh.
      */
     public synchronized long currentAbsoluteOffset() {
         return baseOffset + buffer.length();
     }
 
     /**
-     * Blocks until a terminal response (OK / ERROR) appears at or after
-     * {@code startAbsoluteOffset}, or until {@code timeoutMs} elapses.
+     * Chặn cho đến khi phản hồi kết thúc (OK / ERROR) xuất hiện tại hoặc sau
+     * {@code startAbsoluteOffset}, hoặc đến khi hết {@code timeoutMs}.
      *
-     * @throws ModemTimeoutException on timeout.
+     * @throws ModemTimeoutException khi hết thời gian chờ.
      */
     public String waitForTerminatedResponse(long startAbsoluteOffset,
                                             int timeoutMs,
@@ -95,9 +95,9 @@ public class RxBuffer {
     }
 
     /**
-     * Returns a snapshot of the raw buffer contents and removes everything up to
-     * the given absolute offset.  Used by {@link com.example.sms.modem.SmsIndexDetector}
-     * to drain processed content.
+     * Trả về ảnh chụp nội dung bộ đệm thô và xóa mọi dữ liệu đến offset tuyệt đối
+     * được truyền vào. Được {@link com.example.sms.modem.SmsIndexDetector} dùng
+     * để xả nội dung đã xử lý.
      */
     public synchronized String drainUpTo(long absoluteOffset) {
         long localEnd = absoluteOffset - baseOffset;
@@ -110,18 +110,18 @@ public class RxBuffer {
         return result;
     }
 
-    /** Returns a snapshot of the full buffer without modifying it. */
+    /** Trả về ảnh chụp toàn bộ bộ đệm mà không thay đổi nội dung. */
     public synchronized String snapshot() {
         return buffer.toString();
     }
 
-    /** Wakes all waiting threads (used during shutdown). */
+    /** Đánh thức tất cả luồng đang chờ (dùng khi shutdown). */
     public synchronized void wakeAll() {
         notifyAll();
     }
 
     // -------------------------------------------------------------------------
-    // Helpers
+    // Hàm hỗ trợ
     // -------------------------------------------------------------------------
 
     private static boolean isTerminated(String s) {

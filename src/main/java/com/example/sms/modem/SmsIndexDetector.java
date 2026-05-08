@@ -12,16 +12,15 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Component;
 
 /**
- * Scans the shared {@link RxBuffer} for {@code +CMTI} unsolicited result codes
- * and extracts the SMS memory indexes that the modem reports.
+ * Quét {@link RxBuffer} dùng chung để tìm mã kết quả tự phát {@code +CMTI}
+ * và trích xuất các chỉ số bộ nhớ SMS do modem báo về.
  *
- * <p>Example notification:
+ * <p>Ví dụ thông báo:
  * <pre>+CMTI: "SM",12</pre>
  *
- * <p>{@link #detect()} is designed to be called each time new data is appended
- * to the buffer.  It is stateless beyond the buffer reference and is therefore
- * thread-safe as long as callers serialise their processing of the returned
- * indexes.
+ * <p>{@link #detect()} được thiết kế để gọi mỗi khi có dữ liệu mới được thêm
+ * vào buffer. Lớp này không giữ trạng thái ngoài tham chiếu buffer, nên an toàn
+ * luồng miễn là caller xử lý tuần tự các chỉ số trả về.
  */
 @Component
 @RequiredArgsConstructor
@@ -30,8 +29,8 @@ public class SmsIndexDetector {
     private static final Logger log = LoggerFactory.getLogger(SmsIndexDetector.class);
 
     /**
-     * Matches {@code +CMTI: "SM",12} or {@code +CMTI: "ME",3} etc.
-     * Capture group 1 = the integer SMS index.
+     * Khớp {@code +CMTI: "SM",12}, {@code +CMTI: "ME",3}, v.v.
+     * Nhóm bắt 1 = chỉ số SMS dạng số nguyên.
      */
     private static final Pattern CMTI_PATTERN =
             Pattern.compile("\\+CMTI:\\s*\"[^\"]+\",(\\d+)");
@@ -39,9 +38,9 @@ public class SmsIndexDetector {
     private final RxBuffer rxBuffer;
 
     /**
-     * Scans buffered data for {@code +CMTI} notifications.
+     * Quét dữ liệu trong buffer để tìm thông báo {@code +CMTI}.
      *
-     * @return list of SMS indexes found (may be empty, never null).
+     * @return danh sách chỉ số SMS tìm được (có thể rỗng, không bao giờ null).
      */
     public List<Integer> detect() {
         List<Integer> found = new ArrayList<>();
@@ -64,7 +63,7 @@ public class SmsIndexDetector {
             log.info("New SMS notification detected: index={}", index);
         }
 
-        // Drain everything up to the last matched position so we don't re-process it.
+        // Xả dữ liệu đến vị trí khớp cuối cùng để không xử lý lại.
         if (lastEnd > 0) {
             long absoluteEnd = (endAbsolute - content.length()) + lastEnd;
             rxBuffer.drainUpTo(absoluteEnd);

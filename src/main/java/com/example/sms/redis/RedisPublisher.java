@@ -26,16 +26,16 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Publishes parsed {@link SmsMessage} objects to Redis.
+ * Đẩy các đối tượng {@link SmsMessage} đã phân tích sang Redis.
  *
- * <p>Supports two modes controlled by {@link AppConfig.RedisMode}:
+ * <p>Hỗ trợ hai chế độ được điều khiển bởi {@link AppConfig.RedisMode}:
  * <ul>
- *   <li>{@code LIST} pushes a JSON string to the tail of a Redis list via RPUSH.</li>
- *   <li>{@code PUBSUB} publishes a JSON string to a Redis channel via PUBLISH.</li>
+ *   <li>{@code VALUE} lưu chuỗi JSON mới nhất vào Redis bằng SET.</li>
+ *   <li>{@code PUBSUB} phát chuỗi JSON lên kênh Redis bằng PUBLISH.</li>
  * </ul>
  *
- * <p>Failed publish attempts are retried up to {@code maxRetries} times with
- * exponential back-off before throwing {@link RedisPublishException}.
+ * <p>Các lần gửi thất bại được thử lại tối đa {@code maxRetries} lần với
+ * backoff lũy thừa trước khi ném {@link RedisPublishException}.
  */
 @Component
 @RequiredArgsConstructor
@@ -54,7 +54,7 @@ public class RedisPublisher implements AutoCloseable {
     private RedisCommands<String, String>  commands;
 
     // -------------------------------------------------------------------------
-    // Lifecycle
+    // Vòng đời
     // -------------------------------------------------------------------------
 
     public void connect() {
@@ -90,13 +90,13 @@ public class RedisPublisher implements AutoCloseable {
     }
 
     // -------------------------------------------------------------------------
-    // Publishing
+    // Gửi dữ liệu
     // -------------------------------------------------------------------------
 
     /**
-     * Serialises {@code message} to JSON and pushes/publishes it to Redis.
+     * Chuyển {@code message} thành JSON rồi ghi hoặc phát sang Redis.
      *
-     * @throws RedisPublishException if all retry attempts fail.
+     * @throws RedisPublishException nếu tất cả lần thử đều thất bại.
      */
     public void publish(SmsMessage message) {
         String json = toJson(message);
@@ -114,14 +114,14 @@ public class RedisPublisher implements AutoCloseable {
                     commands.set(target, json);
                     log.info("Set SMS index={} to key '{}'.", message.getIndex(), target);
                 }
-                return;   // success
+                return;   // thành công
 
             } catch (Exception e) {
                 lastException = e;
                 log.warn("Redis publish failed (attempt {}/{}): {}", attempt, maxRetries, e.getMessage());
 
                 if (attempt < maxRetries) {
-                    sleep(INITIAL_BACKOFF_MS * (1L << (attempt - 1)));   // exponential backoff
+                    sleep(INITIAL_BACKOFF_MS * (1L << (attempt - 1)));   // backoff lũy thừa
                 }
             }
         }
@@ -132,7 +132,7 @@ public class RedisPublisher implements AutoCloseable {
     }
 
     /**
-     * Stores a scheduled SMS only if it is newer than the current Redis value.
+     * Chỉ lưu SMS quét theo lịch nếu nó mới hơn giá trị hiện tại trong Redis.
      */
     public boolean publishIfNewerThanCurrent(SmsMessage candidate) {
         if (config.getRedisMode() == AppConfig.RedisMode.PUBSUB) {
@@ -182,8 +182,12 @@ public class RedisPublisher implements AutoCloseable {
                         + " after " + CONDITIONAL_SET_RETRIES + " attempts.", lastException);
     }
 
+    public String ping() {
+        return commands == null ? null : commands.ping();
+    }
+
     // -------------------------------------------------------------------------
-    // Helpers
+    // Hàm hỗ trợ
     // -------------------------------------------------------------------------
 
     private String toJson(SmsMessage msg) {
@@ -248,7 +252,7 @@ public class RedisPublisher implements AutoCloseable {
         try {
             commands.unwatch();
         } catch (Exception ignored) {
-            // Best effort cleanup before the next retry.
+            // Cố gắng dọn dẹp trước lần thử tiếp theo.
         }
     }
 

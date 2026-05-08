@@ -1,18 +1,31 @@
+spring:
+  application:
+    name: sms-serial-reader
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  lifecycle:
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:30s}
+
 server:
   port: ${SERVER_PORT:8080}
+  shutdown: graceful
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: ${MANAGEMENT_ENDPOINTS:health,info,prometheus}
   endpoint:
     health:
+      show-details: ${MANAGEMENT_HEALTH_SHOW_DETAILS:when_authorized}
       probes:
         enabled: true
   info:
     env:
       enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
 
 info:
   app:
@@ -29,7 +42,7 @@ sms:
     password: ${REDIS_PASSWORD:}
     database: ${REDIS_DATABASE:0}
     queue-name: ${REDIS_QUEUE_NAME:sms:incoming}
-    mode: ${REDIS_MODE:LIST}
+    mode: ${REDIS_MODE:VALUE}
     publish-retries: ${REDIS_PUBLISH_RETRIES:3}
   behavior:
     delete-sms-after-read: ${DELETE_SMS_AFTER_READ:false}

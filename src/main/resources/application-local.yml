@@ -1,0 +1,20 @@
+logging:
+  level:
+    root: INFO
+    com.example.sms: DEBUG
+
+management:
+  endpoint:
+    health:
+      show-details: always
+
+sms:
+  serial:
+    port: ${SERIAL_PORT:COM9}
+  redis:
+    host: ${REDIS_HOST:127.0.0.1}
+    database: ${REDIS_DATABASE:0}
+    queue-name: ${REDIS_QUEUE_NAME:sms:incoming:local}
+    mode: ${REDIS_MODE:VALUE}
+  behavior:
+    delete-sms-after-read: ${DELETE_SMS_AFTER_READ:false}

@@ -15,11 +15,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Orchestrates reading an SMS by its memory index:
+ * Điều phối việc đọc SMS theo chỉ số bộ nhớ:
  * <ol>
- *   <li>Send {@code AT+CMGR=index} via the AT client.</li>
- *   <li>Parse the response with {@link SmsParser}.</li>
- *   <li>Optionally delete the SMS from modem memory.</li>
+ *   <li>Gửi {@code AT+CMGR=index} qua AT client.</li>
+ *   <li>Phân tích phản hồi bằng {@link SmsParser}.</li>
+ *   <li>Tùy chọn xóa SMS khỏi bộ nhớ modem.</li>
  * </ol>
  */
 @Service
@@ -34,10 +34,10 @@ public class SmsService {
     private final AppConfig       config;
 
     /**
-     * Reads and parses the SMS at the given modem memory index.
+     * Đọc và phân tích SMS tại chỉ số bộ nhớ modem được truyền vào.
      *
-     * @param index  modem memory index from the +CMTI notification.
-     * @return an {@link Optional} containing the parsed message, or empty if reading fails.
+     * @param index chỉ số bộ nhớ modem từ thông báo +CMTI.
+     * @return {@link Optional} chứa tin nhắn đã phân tích, hoặc rỗng nếu đọc thất bại.
      */
     public Optional<SmsMessage> readAndParse(int index) {
         log.info("Reading SMS at index {}...", index);
@@ -59,14 +59,14 @@ public class SmsService {
     }
 
     /**
-     * Lists all SMS messages currently stored on the modem (debug utility).
+     * Liệt kê tất cả SMS hiện đang lưu trên modem (tiện ích gỡ lỗi).
      */
     public String listAll() {
         return atClient.sendAndWait("AT+CMGL=\"ALL\"");
     }
 
     /**
-     * Lists unread SMS memory indexes from the modem.
+     * Liệt kê các chỉ số bộ nhớ SMS chưa đọc từ modem.
      */
     public List<Integer> listUnreadIndexes() {
         String response = atClient.sendAndWait("AT+CMGL=\"REC UNREAD\"");
@@ -82,7 +82,7 @@ public class SmsService {
     }
     
     /**
-     * Deletes the SMS at the specified index from modem memory.
+     * Xóa SMS tại chỉ số được chỉ định khỏi bộ nhớ modem.
      */
     public void deleteSms(int index) {
         try {

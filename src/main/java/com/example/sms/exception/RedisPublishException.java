@@ -1,6 +1,6 @@
 package com.example.sms.exception;
 
-/** Thrown when publishing to Redis fails even after the configured retries. */
+/** Được ném khi gửi dữ liệu sang Redis vẫn thất bại sau số lần thử lại đã cấu hình. */
 public class RedisPublishException extends RuntimeException {
     public RedisPublishException(String message, Throwable cause) { super(message, cause); }
 }

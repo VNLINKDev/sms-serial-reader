@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ENVIRONMENT="${1:-staging}"
+PROJECT_NAME="${COMPOSE_PROJECT_NAME:-sms-reader}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:${SERVER_PORT:-8080}/actuator/health}"
+
+case "$ENVIRONMENT" in
+  local|dev)
+    COMPOSE_FILES="-f docker-compose.yml"
+    ;;
+  staging)
+    COMPOSE_FILES="-f docker-compose.yml -f docker-compose.staging.yml"
+    ;;
+  prod|production)
+    COMPOSE_FILES="-f docker-compose.yml -f docker-compose.prod.yml"
+    ;;
+  *)
+    echo "Unsupported environment: $ENVIRONMENT" >&2
+    exit 2
+    ;;
+esac
+
+if [ ! -f .env ]; then
+  echo "Missing .env. Create it from .env.example and fill production values." >&2
+  exit 1
+fi
+
+mkdir -p logs backups
+
+CURRENT_IMAGE="$(docker compose $COMPOSE_FILES -p "$PROJECT_NAME" images -q sms-reader 2>/dev/null | head -n1 || true)"
+if [ -n "$CURRENT_IMAGE" ]; then
+  echo "$CURRENT_IMAGE" > .previous-image
+fi
+
+docker compose $COMPOSE_FILES -p "$PROJECT_NAME" pull --ignore-pull-failures
+docker compose $COMPOSE_FILES -p "$PROJECT_NAME" build sms-reader
+docker compose $COMPOSE_FILES -p "$PROJECT_NAME" up -d --remove-orphans
+
+echo "Waiting for health endpoint: $HEALTH_URL"
+for i in $(seq 1 30); do
+  if curl -fsS "$HEALTH_URL" | grep -q '"status":"UP"'; then
+    echo "Deploy succeeded."
+    docker compose $COMPOSE_FILES -p "$PROJECT_NAME" ps
+    exit 0
+  fi
+  sleep 5
+done
+
+echo "Deploy failed: health check did not return UP." >&2
+docker compose $COMPOSE_FILES -p "$PROJECT_NAME" logs --tail=200 sms-reader >&2
+./scripts/rollback.sh "$ENVIRONMENT" || true
+exit 1

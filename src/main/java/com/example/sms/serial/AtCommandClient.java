@@ -11,15 +11,14 @@ import java.nio.charset.StandardCharsets;
 import org.springframework.stereotype.Component;
 
 /**
- * Thread-safe client for sending AT commands to a GSM modem and waiting for
- * their response.
+ * Thành phần gửi lệnh an toàn luồng để gửi lệnh AT tới modem GSM và chờ phản hồi.
  *
- * <p>All command submissions MUST be serialised through a single-thread executor
- * to avoid interleaved writes to the modem.  The caller is responsible for that
- * serialisation; this class only deals with sending bytes and matching responses.
+ * <p>Mọi lần gửi lệnh PHẢI được tuần tự hóa qua executor một luồng để tránh
+ * ghi xen kẽ vào modem. Bên gọi chịu trách nhiệm tuần tự hóa; lớp này chỉ xử lý
+ * việc gửi byte và khớp phản hồi.
  *
- * <p>Response matching is delegated to a shared {@link RxBuffer} that is
- * populated by {@link SerialReaderService}.
+ * <p>Việc khớp phản hồi được giao cho {@link RxBuffer} dùng chung, nơi được
+ * {@link SerialReaderService} nạp dữ liệu.
  */
 @Component
 @RequiredArgsConstructor
@@ -33,23 +32,22 @@ public class AtCommandClient {
     private final RxBuffer     rxBuffer;
 
     // -------------------------------------------------------------------------
-    // Public API
+    // API công khai
     // -------------------------------------------------------------------------
 
     /**
-     * Sends {@code command} and waits up to {@link #DEFAULT_TIMEOUT_MS} ms for
-     * a terminal response (OK / ERROR).
+     * Gửi {@code command} và chờ tối đa {@link #DEFAULT_TIMEOUT_MS} ms để nhận
+     * phản hồi kết thúc (OK / ERROR).
      *
-     * @return the modem's response text.
-     * @throws ModemTimeoutException if no terminal response arrives in time.
+     * @return nội dung phản hồi từ modem.
+     * @throws ModemTimeoutException nếu không nhận được phản hồi kết thúc đúng hạn.
      */
     public String sendAndWait(String command) {
         return sendAndWait(command, DEFAULT_TIMEOUT_MS);
     }
 
     /**
-     * Sends {@code command} and waits up to {@code timeoutMs} for a terminal
-     * response.
+     * Gửi {@code command} và chờ tối đa {@code timeoutMs} để nhận phản hồi kết thúc.
      */
     public String sendAndWait(String command, int timeoutMs) {
         long startAbsolute = rxBuffer.currentAbsoluteOffset();
@@ -60,8 +58,8 @@ public class AtCommandClient {
     }
 
     /**
-     * Sends a raw AT command without waiting for a response.
-     * Used internally and exposed for special cases (e.g. escape sequences).
+     * Gửi lệnh AT thô mà không chờ phản hồi.
+     * Dùng nội bộ và mở ra cho các trường hợp đặc biệt (ví dụ chuỗi escape).
      */
     public void sendRaw(String command) {
         OutputStream outputStream = portManager.getOutputStream();

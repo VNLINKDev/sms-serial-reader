@@ -1,0 +1,16 @@
+logging:
+  level:
+    root: INFO
+    com.example.sms: INFO
+
+management:
+  endpoint:
+    health:
+      show-details: never
+
+sms:
+  redis:
+    database: ${REDIS_DATABASE:0}
+    queue-name: ${REDIS_QUEUE_NAME:sms:incoming}
+  behavior:
+    delete-sms-after-read: ${DELETE_SMS_AFTER_READ:true}

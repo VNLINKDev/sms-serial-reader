@@ -9,11 +9,11 @@ import java.nio.charset.StandardCharsets;
 import org.springframework.stereotype.Component;
 
 /**
- * Continuously reads raw bytes from a serial {@link InputStream} on a dedicated
- * daemon thread and appends them to the shared {@link RxBuffer}.
+ * Liên tục đọc byte thô từ {@link InputStream} serial trên một daemon thread
+ * riêng và thêm vào {@link RxBuffer} dùng chung.
  *
- * <p>This class is intentionally free of modem or SMS logic; it only moves bytes
- * from the wire to memory.
+ * <p>Lớp này cố ý không chứa logic modem hoặc SMS; nó chỉ chuyển byte từ đường
+ * truyền vào bộ nhớ.
  */
 @Component
 @RequiredArgsConstructor
@@ -28,10 +28,10 @@ public class SerialReaderService {
     private Thread            readerThread;
 
     // -------------------------------------------------------------------------
-    // Lifecycle
+    // Vòng đời
     // -------------------------------------------------------------------------
 
-    /** Starts the background reader thread. */
+    /** Khởi động luồng đọc nền. */
     public void start() {
         running      = true;
         readerThread = new Thread(this::readLoop, "sms-serial-reader");
@@ -40,7 +40,7 @@ public class SerialReaderService {
         log.info("Serial reader thread started.");
     }
 
-    /** Signals the reader to stop and wakes any waiting threads. */
+    /** Báo hiệu dừng luồng đọc và đánh thức các luồng đang chờ. */
     public void stop() {
         running = false;
         rxBuffer.wakeAll();
@@ -53,7 +53,7 @@ public class SerialReaderService {
     }
 
     // -------------------------------------------------------------------------
-    // Read loop
+    // Vòng lặp đọc
     // -------------------------------------------------------------------------
 
     private void readLoop() {

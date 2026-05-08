@@ -15,8 +15,8 @@ import java.util.Arrays;
 import java.util.stream.Collectors;
 
 /**
- * Responsible solely for the lifecycle of a {@link SerialPort}: open, configure,
- * expose streams, and close.  All higher-level concerns live elsewhere.
+ * Chỉ chịu trách nhiệm vòng đời của {@link SerialPort}: mở, cấu hình,
+ * cung cấp luồng dữ liệu và đóng. Các xử lý cấp cao hơn nằm ở lớp khác.
  */
 @Component
 @RequiredArgsConstructor
@@ -34,13 +34,13 @@ public class SerialPortManager implements AutoCloseable {
     private OutputStream outputStream;
 
     // -------------------------------------------------------------------------
-    // Lifecycle
+    // Vòng đời
     // -------------------------------------------------------------------------
 
     /**
-     * Opens and configures the serial port.
+     * Mở và cấu hình cổng serial.
      *
-     * @throws SerialPortException if the port cannot be opened.
+     * @throws SerialPortException nếu không mở được cổng.
      */
     public void open() {
         String portName = config.getSerialPort();
@@ -87,7 +87,7 @@ public class SerialPortManager implements AutoCloseable {
     }
 
     // -------------------------------------------------------------------------
-    // Accessors
+    // Hàm truy cập
     // -------------------------------------------------------------------------
 
     public InputStream getInputStream() {
@@ -105,10 +105,10 @@ public class SerialPortManager implements AutoCloseable {
     }
 
     // -------------------------------------------------------------------------
-    // Utilities
+    // Tiện ích
     // -------------------------------------------------------------------------
 
-    /** Returns a comma-separated list of all detected serial port names. */
+    /** Trả về danh sách tên các cổng serial phát hiện được, phân tách bằng dấu phẩy. */
     public static String listAvailablePorts() {
         SerialPort[] ports = SerialPort.getCommPorts();
         if (ports.length == 0) return "(none found)";

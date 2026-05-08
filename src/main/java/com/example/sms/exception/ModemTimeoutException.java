@@ -1,6 +1,6 @@
 package com.example.sms.exception;
 
-/** Thrown when the modem does not respond within the allotted timeout. */
+/** Được ném khi modem không phản hồi trong thời gian chờ cho phép. */
 public class ModemTimeoutException extends RuntimeException {
     public ModemTimeoutException(String command, int timeoutMs) {
         super("Modem did not respond to '" + command + "' within " + timeoutMs + " ms");
