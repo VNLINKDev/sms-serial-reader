@@ -127,7 +127,7 @@ curl http://localhost:8080/actuator/health
 | `REDIS_PASSWORD` | rỗng | Redis AUTH, để trong `.env`/secret |
 | `REDIS_DATABASE` | `0` | Redis database index |
 | `REDIS_QUEUE_NAME` | `sms:incoming` | Redis key/channel |
-| `REDIS_MODE` | `VALUE` | `VALUE` dùng `SET`, `PUBSUB` dùng `PUBLISH` |
+| `REDIS_MODE` | `VALUE` | `VALUE` dùng `SET`, `LIST` dùng `RPUSH` |
 | `REDIS_PUBLISH_RETRIES` | `3` | Số lần retry publish |
 | `DELETE_SMS_AFTER_READ` | `false` local/staging, `true` prod | Xóa SMS khỏi modem sau khi đọc |
 | `UNREAD_POLL_INTERVAL_MS` | `60000` | Chu kỳ scan SMS chưa đọc |
