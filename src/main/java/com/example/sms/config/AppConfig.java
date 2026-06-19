@@ -1,30 +1,45 @@
 package com.example.sms.config;
 
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
-import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.validation.annotation.Validated;
-
 /**
- * Cấu hình nghiệp vụ của service, được bind từ prefix {@code sms.*}.
- *
+ * Cấu hình nghiệp vụ của service, được nạp trực tiếp từ các biến môi trường (Environment Variables).
  */
-@Validated
-@ConfigurationProperties(prefix = "sms")
 @Data
 public class AppConfig {
 
-    @Valid
-    private final Serial serial = new Serial();
+    private final String serialPort = getEnv("SERIAL_PORT", "COM5");
+    private final int baudRate = getEnvInt("BAUD_RATE", 115200);
 
-    @Valid
-    private final Redis redis = new Redis();
+    private final String redisHost = getEnv("REDIS_HOST", "127.0.0.1");
+    private final int redisPort = getEnvInt("REDIS_PORT", 6379);
+    private final String redisPassword = getEnv("REDIS_PASSWORD", "");
+    private final int redisDatabase = getEnvInt("REDIS_DATABASE", 0);
+    private final String redisQueueName = getEnv("REDIS_QUEUE_NAME", "sms:incoming");
+    private final RedisMode redisMode = getEnvEnum("REDIS_MODE", RedisMode.class, RedisMode.VALUE);
+    private final int redisPublishRetries = getEnvInt("REDIS_PUBLISH_RETRIES", 3);
+    /** Key lưu JSON của tin nhắn mới nhất đã publish — dùng để check duplicate thay vì scan list. */
+    private final String redisLatestKey = getEnv("REDIS_LATEST_KEY", "sms:latest");
 
-    @Valid
-    private final Behavior behavior = new Behavior();
+    private final boolean deleteSmsAfterRead = getEnvBoolean("DELETE_SMS_AFTER_READ", false);
+    private final long unreadPollIntervalMs = getEnvLong("UNREAD_POLL_INTERVAL_MS", 60000L);
+    private final int pollIntervalMs = getEnvInt("POLL_INTERVAL_MS", 100);
+
+    /** Ngưỡng số SMS trên SIM kích hoạt cleanup tự động (mặc định 20/30 slot). */
+    private final int simHighWatermark = getEnvInt("SIM_HIGH_WATERMARK", 20);
+    /** Số tin nhắn gần nhất giữ lại sau cleanup để phục vụ debug (mặc định 5). */
+    private final int simKeepRecent = getEnvInt("SIM_KEEP_RECENT", 5);
+
+    /** Bật/tắt gửi notification lên Telegram khi nhận OTP. */
+    private final boolean telegramEnabled = getEnvBoolean("TELEGRAM_ENABLED", false);
+    /** Token của Telegram Bot (lấy từ @BotFather). */
+    private final String telegramBotToken = getEnv("TELEGRAM_BOT_TOKEN", "");
+    /** Chat ID của group/channel Telegram nhận notification. */
+    private final String telegramChatId = getEnv("TELEGRAM_CHAT_ID", "");
+
+    private final String smsIndexCmtiPattern = getEnv("SMS_INDEX_CMTI_PATTERN", "\\+CMTI:\\s*\"[^\"]+\",(\\d+)");
+    private final String smsIndexCmglPattern = getEnv("SMS_INDEX_CMGL_PATTERN", "\\+CMGL:\\s*(\\d+),");
+    private final String smsOtpPattern = getEnv("SMS_OTP_PATTERN", "Ma\\s+giao\\s+dich\\s+(\\d+).*?OTP\\s*:?\\s*(\\d+)");
 
     /**
      * Chế độ ghi Redis:
@@ -33,89 +48,52 @@ public class AppConfig {
      */
     public enum RedisMode { VALUE, LIST }
 
-    public String getSerialPort() {
-        return serial.getPort();
+    private static String getEnv(String name, String defaultValue) {
+        String value = System.getenv(name);
+        return (value != null && !value.isBlank()) ? value.trim() : defaultValue;
     }
 
-    public int getBaudRate() {
-        return serial.getBaudRate();
+    private static int getEnvInt(String name, int defaultValue) {
+        String value = System.getenv(name);
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
     }
 
-    public String getRedisHost() {
-        return redis.getHost();
+    private static long getEnvLong(String name, long defaultValue) {
+        String value = System.getenv(name);
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
     }
 
-    public int getRedisPort() {
-        return redis.getPort();
+    private static boolean getEnvBoolean(String name, boolean defaultValue) {
+        String value = System.getenv(name);
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        return Boolean.parseBoolean(value.trim());
     }
 
-    public String getRedisPassword() {
-        return redis.getPassword();
-    }
-
-    public int getRedisDatabase() {
-        return redis.getDatabase();
-    }
-
-    public String getRedisQueueName() {
-        return redis.getQueueName();
-    }
-
-    public RedisMode getRedisMode() {
-        return redis.getMode();
-    }
-
-    public boolean isDeleteSmsAfterRead() {
-        return behavior.isDeleteSmsAfterRead();
-    }
-
-    public long getUnreadPollIntervalMs() {
-        return behavior.getUnreadPollIntervalMs();
-    }
-
-    public int getRedisPublishRetries() {
-        return redis.getPublishRetries();
-    }
-
-    /** Cấu hình kết nối serial tới modem GSM. */
-    @Data
-    public static class Serial {
-        @NotBlank
-        private String port;
-
-        @Min(1)
-        private int baudRate = 115200;
-    }
-
-    /** Cấu hình Redis và cách publish payload SMS đã parse. */
-    @Data
-    public static class Redis {
-        @NotBlank
-        private String host = "127.0.0.1";
-
-        @Min(1)
-        private int port = 6379;
-
-        private String password;
-
-        @Min(0)
-        private int database = 0;
-
-        @NotBlank
-        private String queueName = "sms:incoming";
-
-        private RedisMode mode = RedisMode.VALUE;
-
-        @Min(1)
-        private int publishRetries = 3;
-    }
-
-    /** Cấu hình hành vi xử lý SMS sau khi đọc và lịch recovery. */
-    @Data
-    public static class Behavior {
-        private boolean deleteSmsAfterRead = false;
-
-        @Min(1000)
-        private long unreadPollIntervalMs = 60_000;
+    private static <T extends Enum<T>> T getEnvEnum(String name, Class<T> enumClass, T defaultValue) {
+        String value = System.getenv(name);
+        if (value == null || value.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return Enum.valueOf(enumClass, value.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            return defaultValue;
+        }
     }
 }

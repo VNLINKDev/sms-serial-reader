@@ -12,12 +12,9 @@ import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.sync.RedisCommands;
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -30,13 +27,15 @@ import java.util.Optional;
  * JSON và đưa sang Redis.
  *
  * Service hỗ trợ hai kiểu delivery:
- * 
- *   {@code VALUE}: ghi SMS mới nhất vào một Redis key bằng SET. Mode này phù
- *       hợp với consumer cần đọc trạng thái hiện tại và cho phép flow recovery
- *       so sánh timestamp để tránh ghi đè dữ liệu mới.
- *   {@code LIST}: lưu tất cả SMS vào một list, phù hợp với consumer cần đọc toàn bộ SMS.
+ *
+ * {@code VALUE}: ghi SMS mới nhất vào một Redis key bằng SET.
+ * {@code LIST}: lưu tất cả SMS vào một list, phù hợp với consumer cần đọc toàn bộ SMS.
+ *
+ * Ngoài queue chính ({@code redisQueueName}), service luôn duy trì một key phụ
+ * ({@code redisLatestKey}) lưu JSON của tin nhắn mới nhất đã publish.
+ * Key này được dùng để kiểm tra duplicate trong flow recovery thay vì scan vào list,
+ * giúp tách biệt logic check khỏi cấu trúc dữ liệu của queue chính.
  */
-@Component
 @RequiredArgsConstructor
 public class RedisPublisher implements AutoCloseable {
 
@@ -45,12 +44,12 @@ public class RedisPublisher implements AutoCloseable {
     private static final long INITIAL_BACKOFF_MS = 200;
     private static final int CONDITIONAL_SET_RETRIES = 3;
 
-    private final AppConfig   config;
+    private final AppConfig config;
     private final ObjectMapper mapper = buildMapper();
 
-    private RedisClient                    redisClient;
+    private RedisClient redisClient;
     private StatefulRedisConnection<String, String> connection;
-    private RedisCommands<String, String>  commands;
+    private RedisCommands<String, String> commands;
 
     // -------------------------------------------------------------------------
     // Vòng đời Redis connection
@@ -75,29 +74,22 @@ public class RedisPublisher implements AutoCloseable {
         }
 
         redisClient = RedisClient.create(uriBuilder.build());
-        connection  = redisClient.connect();
-        commands    = connection.sync();
+        connection = redisClient.connect();
+        commands = connection.sync();
 
         log.info("Connected to Redis at {}:{}/{}",
                 config.getRedisHost(), config.getRedisPort(), config.getRedisDatabase());
     }
 
-    @PostConstruct
-    void init() {
-        connect();
-    }
-
     /**
      * Đóng connection trước khi bean bị destroy.
-     *
-     * NOTE: Method này intentionally idempotent ở mức null-check để an toàn
-     * khi Spring shutdown sau một lỗi startup một phần.
      */
     @Override
-    @PreDestroy
     public void close() {
-        if (connection != null) connection.close();
-        if (redisClient != null) redisClient.shutdown();
+        if (connection != null)
+            connection.close();
+        if (redisClient != null)
+            redisClient.shutdown();
         log.info("Redis connection closed.");
     }
 
@@ -117,6 +109,7 @@ public class RedisPublisher implements AutoCloseable {
     public void publish(SmsMessage message) {
         String json = toJson(message);
         String target = config.getRedisQueueName();
+        String latestKey = config.getRedisLatestKey();
         int maxRetries = config.getRedisPublishRetries();
 
         Exception lastException = null;
@@ -130,73 +123,90 @@ public class RedisPublisher implements AutoCloseable {
                     commands.set(target, json);
                     log.info("Set SMS index={} to key '{}'.", message.getIndex(), target);
                 }
-                return;   // thành công
+                // Luôn cập nhật key latest để flow recovery có thể check chính xác.
+                commands.set(latestKey, json);
+                log.debug("Updated latest-key '{}' for SMS index={}.", latestKey, message.getIndex());
+                return; // thành công
 
             } catch (Exception e) {
                 lastException = e;
                 log.warn("Redis publish failed (attempt {}/{}): {}", attempt, maxRetries, e.getMessage());
 
                 if (attempt < maxRetries) {
-                    sleep(INITIAL_BACKOFF_MS * (1L << (attempt - 1)));   // backoff lũy thừa
+                    sleep(INITIAL_BACKOFF_MS * (1L << (attempt - 1))); // backoff lũy thừa
                 }
             }
         }
 
         throw new RedisPublishException(
                 "Failed to publish SMS index=" + message.getIndex()
-                + " after " + maxRetries + " attempts.", lastException);
+                        + " after " + maxRetries + " attempts.",
+                lastException);
     }
 
     /**
      * Ghi SMS từ flow recovery chỉ khi dữ liệu mới hơn state hiện tại.
      *
-     * Dùng Redis WATCH/MULTI/EXEC để tránh race condition: nếu một SMS realtime
-     * mới hơn được ghi vào cùng key trong lúc scheduler đang compare, EXEC sẽ bị
-     * discard và method retry. Điều kiện mới hơn dựa trên timestamp, tie-breaker
-     * bằng modem index để có thứ tự ổn định khi timestamp bằng nhau.
+     * So sánh dựa trên {@code redisLatestKey} — key value riêng lưu JSON của tin
+     * nhắn mới nhất đã publish — thay vì đọc từ queue chính (list/value). Nhờ đó
+     * logic check hoàn toàn tách khỏi cấu trúc dữ liệu của queue chính, đồng thời
+     * đơn giản hơn vì latestKey luôn là dạng string (không cần lindex).
      *
-     * NOTE: Transaction Redis đang dùng connection singleton. Nếu sau này có
-     * nhiều writer gọi trực tiếp adapter này song song, cần synchronize đoạn
-     * WATCH/MULTI/EXEC hoặc dùng connection riêng cho transaction để tránh command
-     * từ flow khác xen vào cùng connection.
+     * WATCH được đặt trên {@code latestKey}: nếu flow realtime cập nhật key này
+     * trong lúc scheduler đang so sánh, EXEC bị discard và method retry.
      *
-     * Edge case: nếu payload hiện tại trong Redis không parse được, method cho
-     * phép overwrite để service tự phục hồi khỏi dữ liệu cũ/sai schema.
+     * Khi commit, transaction ghi đồng thời vào queue chính (rpush/set) và
+     * cập nhật {@code latestKey} để các lần check sau có state mới nhất.
+     *
+     * NOTE: Transaction dùng connection singleton — xem lưu ý concurrency ở {@link #publish}.
+     *
+     * Edge case: nếu latestKey không parse được, cho phép overwrite để tự phục hồi.
      */
     public boolean publishIfNewerThanCurrent(SmsMessage candidate) {
-        if (config.getRedisMode() == AppConfig.RedisMode.LIST) {
-            log.warn("Skipping conditional Redis save for SMS index={} because LIST mode has no stored latest value.",
-                    candidate.getIndex());
-            return false;
-        }
-
         String target = config.getRedisQueueName();
+        String latestKey = config.getRedisLatestKey();
         String json = toJson(candidate);
+        boolean isListMode = (config.getRedisMode() == AppConfig.RedisMode.LIST);
         Exception lastException = null;
 
         for (int attempt = 1; attempt <= CONDITIONAL_SET_RETRIES; attempt++) {
             try {
-                commands.watch(target);
+                // WATCH latestKey: transaction bị discard nếu flow realtime thay đổi key này.
+                commands.watch(latestKey);
 
-                String currentJson = commands.get(target);
+                // Đọc từ latestKey (luôn là value) thay vì scan vào queue chính.
+                String currentJson = commands.get(latestKey);
                 Optional<StoredSms> current = parseStoredSms(currentJson);
                 if (current.isPresent() && !isNewer(candidate, current.get())) {
                     commands.unwatch();
-                    log.info("Skipped scheduled SMS index={} because Redis already has newer/equal SMS index={}.",
-                            candidate.getIndex(), current.get().index());
+                    log.info("Skipped scheduled SMS index={} because latest-key '{}' already has newer/equal SMS index={}.",
+                            candidate.getIndex(), latestKey, current.get().index());
                     return false;
                 }
 
                 commands.multi();
-                commands.set(target, json);
+                // Ghi vào queue chính.
+                if (isListMode) {
+                    commands.rpush(target, json);
+                } else {
+                    commands.set(target, json);
+                }
+                // Đồng thời cập nhật latestKey để check lần sau chính xác.
+                commands.set(latestKey, json);
                 TransactionResult result = commands.exec();
                 if (!result.wasDiscarded()) {
-                    log.info("Set scheduled SMS index={} to key '{}'.", candidate.getIndex(), target);
+                    if (isListMode) {
+                        log.info("Pushed scheduled SMS index={} to list '{}' and updated latest-key '{}'.",
+                                candidate.getIndex(), target, latestKey);
+                    } else {
+                        log.info("Set scheduled SMS index={} to key '{}' and updated latest-key '{}'.",
+                                candidate.getIndex(), target, latestKey);
+                    }
                     return true;
                 }
 
-                log.info("Retrying scheduled SMS index={} because Redis key '{}' changed during compare.",
-                        candidate.getIndex(), target);
+                log.info("Retrying scheduled SMS index={} because latest-key '{}' changed during compare.",
+                        candidate.getIndex(), latestKey);
 
             } catch (Exception e) {
                 lastException = e;
@@ -208,7 +218,8 @@ public class RedisPublisher implements AutoCloseable {
 
         throw new RedisPublishException(
                 "Failed conditional publish for scheduled SMS index=" + candidate.getIndex()
-                        + " after " + CONDITIONAL_SET_RETRIES + " attempts.", lastException);
+                        + " after " + CONDITIONAL_SET_RETRIES + " attempts.",
+                lastException);
     }
 
     public String ping() {
@@ -222,10 +233,10 @@ public class RedisPublisher implements AutoCloseable {
     private String toJson(SmsMessage msg) {
         try {
             Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("index",      msg.getIndex());
-            payload.put("transactionId",     msg.getTransactionId());
-            payload.put("otp",        msg.getOtp());
-            payload.put("timestamp",  msg.getTimestamp());
+            payload.put("index", msg.getIndex());
+            payload.put("transactionId", msg.getTransactionId());
+            payload.put("otp", msg.getOtp());
+            payload.put("timestamp", msg.getTimestamp());
 
             return mapper.writeValueAsString(payload);
 
@@ -240,7 +251,8 @@ public class RedisPublisher implements AutoCloseable {
         }
 
         try {
-            Map<String, Object> payload = mapper.readValue(json, new TypeReference<>() {});
+            Map<String, Object> payload = mapper.readValue(json, new TypeReference<>() {
+            });
             Object timestampValue = payload.get("timestamp");
             if (timestampValue == null) {
                 return Optional.empty();
@@ -262,8 +274,8 @@ public class RedisPublisher implements AutoCloseable {
     }
 
     private static int parseIndex(Object value) {
-        if (value instanceof Number number) {
-            return number.intValue();
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
         }
         if (value == null) {
             return -1;
@@ -293,9 +305,23 @@ public class RedisPublisher implements AutoCloseable {
     }
 
     private static void sleep(long ms) {
-        try { Thread.sleep(ms); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
-    private record StoredSms(int index, OffsetDateTime timestamp) {
+    private static final class StoredSms {
+        private final int index;
+        private final OffsetDateTime timestamp;
+
+        StoredSms(int index, OffsetDateTime timestamp) {
+            this.index = index;
+            this.timestamp = timestamp;
+        }
+
+        int index() { return index; }
+        OffsetDateTime timestamp() { return timestamp; }
     }
 }

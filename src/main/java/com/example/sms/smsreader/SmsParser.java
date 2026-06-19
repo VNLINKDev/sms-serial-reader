@@ -1,6 +1,7 @@
 package com.example.sms.smsreader;
 
 import com.example.sms.exception.SmsParseException;
+import com.example.sms.exception.NonOtpSmsException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -9,7 +10,6 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.springframework.stereotype.Component;
 
 /**
  * Parser chuyển raw response của lệnh {@code AT+CMGR} thành domain model
@@ -23,7 +23,6 @@ import org.springframework.stereotype.Component;
  * thời điểm hiện tại để không làm rơi message, nhưng log/monitoring phía trên nên
  * theo dõi tỷ lệ parse fallback nếu cần độ chính xác thời gian cao.
  */
-@Component
 public class SmsParser {
 
     private static final Logger log = LoggerFactory.getLogger(SmsParser.class);
@@ -34,9 +33,11 @@ public class SmsParser {
     private static final Pattern TIMESTAMP_PATTERN = Pattern.compile(
             "(\\d{2})/(\\d{2})/(\\d{2}),(\\d{2}):(\\d{2}):(\\d{2})([+-])(\\d+)");
 
-    private static final Pattern OTP_PATTERN = Pattern.compile(
-            "Ma\\s+giao\\s+dich\\s+(\\d+).*?OTP\\s*:?\\s*(\\d+)",
-            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    private final Pattern otpPattern;
+
+    public SmsParser(String otpPatternRegex) {
+        this.otpPattern = Pattern.compile(otpPatternRegex, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    }
 
     /**
      * Parse response đầy đủ của {@code AT+CMGR=index}.
@@ -84,10 +85,10 @@ public class SmsParser {
 
         String body = bodyBuilder.toString().trim();
 
-        Matcher otpMatcher = OTP_PATTERN.matcher(body);
+        Matcher otpMatcher = otpPattern.matcher(body);
 
         if (!otpMatcher.find()) {
-            throw new SmsParseException("Cannot extract OTP from SMS body: " + body);
+            throw new NonOtpSmsException("Cannot extract OTP from SMS body: " + body);
         }
 
         String transactionId = otpMatcher.group(1);

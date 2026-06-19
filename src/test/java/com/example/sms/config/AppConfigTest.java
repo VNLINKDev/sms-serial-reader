@@ -1,55 +1,39 @@
 package com.example.sms.config;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-import org.springframework.context.annotation.Configuration;
 
 class AppConfigTest {
 
-    private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-            .withUserConfiguration(Config.class);
-
     @Test
-    void bindsSpringProperties() {
-        contextRunner
-                .withPropertyValues(
-                        "sms.serial.port=COM9",
-                        "sms.serial.baud-rate=9600",
-                        "sms.redis.host=redis.local",
-                        "sms.redis.port=6380",
-                        "sms.redis.database=2",
-                        "sms.redis.queue-name=sms:test",
-                        "sms.redis.mode=PUBSUB",
-                        "sms.redis.publish-retries=5",
-                        "sms.behavior.delete-sms-after-read=true"
-                )
-                .run(context -> {
-                    AppConfig config = context.getBean(AppConfig.class);
+    void verifiesDefaultValues() {
+        AppConfig config = new AppConfig();
 
-                    assertThat(config.getSerialPort()).isEqualTo("COM9");
-                    assertThat(config.getBaudRate()).isEqualTo(9600);
-                    assertThat(config.getRedisHost()).isEqualTo("redis.local");
-                    assertThat(config.getRedisPort()).isEqualTo(6380);
-                    assertThat(config.getRedisDatabase()).isEqualTo(2);
-                    assertThat(config.getRedisQueueName()).isEqualTo("sms:test");
-                    assertThat(config.getRedisMode()).isEqualTo(AppConfig.RedisMode.LIST);
-                    assertThat(config.getRedisPublishRetries()).isEqualTo(5);
-                    assertThat(config.isDeleteSmsAfterRead()).isTrue();
-                });
-    }
+        // Kiểm tra các giá trị mặc định khi không có biến môi trường nào được set
+        assertEquals("COM5", config.getSerialPort());
+        assertEquals(115200, config.getBaudRate());
 
-    @Test
-    void requiresSerialPort() {
-        contextRunner
-                .withPropertyValues("sms.serial.port=")
-                .run(context -> assertThat(context).hasFailed());
-    }
+        assertEquals("127.0.0.1", config.getRedisHost());
+        assertEquals(6379, config.getRedisPort());
+        assertEquals("", config.getRedisPassword());
+        assertEquals(0, config.getRedisDatabase());
+        assertEquals("sms:incoming", config.getRedisQueueName());
+        assertEquals(AppConfig.RedisMode.VALUE, config.getRedisMode());
+        assertEquals(3, config.getRedisPublishRetries());
 
-    @Configuration(proxyBeanMethods = false)
-    @EnableConfigurationProperties(AppConfig.class)
-    static class Config {
+        assertFalse(config.isDeleteSmsAfterRead());
+        assertEquals(60000L, config.getUnreadPollIntervalMs());
+        assertEquals(100, config.getPollIntervalMs());
+
+        assertEquals("\\+CMTI:\\s*\"[^\"]+\",(\\d+)", config.getSmsIndexCmtiPattern());
+        assertEquals("\\+CMGL:\\s*(\\d+),", config.getSmsIndexCmglPattern());
+        assertEquals("Ma\\s+giao\\s+dich\\s+(\\d+).*?OTP\\s*:?\\s*(\\d+)", config.getSmsOtpPattern());
+
+        assertEquals(20, config.getSimHighWatermark());
+        assertEquals(5, config.getSimKeepRecent());
+
     }
 }

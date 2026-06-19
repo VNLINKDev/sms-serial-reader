@@ -3,7 +3,6 @@ package com.example.sms.serial;
 import com.example.sms.exception.ModemTimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 /**
  * Bộ đệm nhận dùng chung giữa thread đọc serial và thread gửi AT command.
@@ -18,7 +17,6 @@ import org.springframework.stereotype.Component;
  * đối của phần đã bị cắt, nhờ đó command đang chờ vẫn có thể tính lại vị trí
  * tương đối sau khi buffer bị trim.
  */
-@Component
 public class RxBuffer {
 
     private static final Logger log = LoggerFactory.getLogger(RxBuffer.class);

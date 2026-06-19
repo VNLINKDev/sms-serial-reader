@@ -8,7 +8,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import org.springframework.stereotype.Component;
 
 /**
  * Gateway cấp thấp để gửi AT command tới modem GSM qua serial port.
@@ -22,7 +21,6 @@ import org.springframework.stereotype.Component;
  * bị match sai vì modem không gắn correlation id cho từng command. Luôn gọi qua
  * executor tuần tự ở tầng orchestration.
  */
-@Component
 @RequiredArgsConstructor
 public class AtCommandClient {
 

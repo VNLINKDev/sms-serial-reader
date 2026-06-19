@@ -8,14 +8,13 @@ import com.example.sms.serial.SerialPortManager;
 import com.example.sms.serial.SerialReaderService;
 import com.example.sms.smsreader.SmsMessage;
 import com.example.sms.smsreader.SmsService;
+import com.example.sms.telegram.TelegramNotifier;
 
-import jakarta.annotation.PreDestroy;
-
-import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -25,11 +24,6 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.springframework.boot.ApplicationArguments;
-import org.springframework.boot.ApplicationRunner;
-import org.springframework.scheduling.TaskScheduler;
-import org.springframework.stereotype.Component;
-
 /**
  * Runtime chính chịu trách nhiệm điều phối toàn bộ luồng xử lý SMS.
  *
@@ -38,23 +32,18 @@ import org.springframework.stereotype.Component;
  * - Theo dõi SMS mới liên tục
  * - Đọc và parse SMS
  * - Publish message sang Redis
- * - Scan SMS unread định kỳ để tránh miss message
+ * - Scan toàn bộ SMS trên SIM định kỳ, lấy tin nhắn mới nhất để tránh miss
+ * message
  *
  * Thiết kế concurrency:
- * - 1 thread polling liên tục detect SMS mới
+ * - 1 thread polling liên tục detect SMS mới qua CMTI
  * - 1 single-thread executor để serialize AT command
- * - 1 scheduler scan SMS unread định kỳ
+ * - 1 scheduler scan định kỳ (AT+CMGL="ALL", lấy index mới nhất)
  */
-@Component
 @RequiredArgsConstructor
-public class SmsReaderRuntime implements ApplicationRunner {
+public class SmsReaderRuntime {
 
     private static final Logger log = LoggerFactory.getLogger(SmsReaderRuntime.class);
-
-    /**
-     * Thời gian sleep giữa các lần polling modem.
-     */
-    private static final int POLL_INTERVAL_MS = 100;
 
     private final SerialPortManager portManager;
     private final SerialReaderService readerService;
@@ -62,7 +51,8 @@ public class SmsReaderRuntime implements ApplicationRunner {
     private final SmsIndexDetector indexDetector;
     private final SmsService smsService;
     private final RedisPublisher redisPublisher;
-    private final TaskScheduler taskScheduler;
+    private final TelegramNotifier telegramNotifier;
+    private final ScheduledExecutorService scheduler;
     private final AppConfig appConfig;
 
     /**
@@ -90,12 +80,12 @@ public class SmsReaderRuntime implements ApplicationRunner {
     private Thread pollThread;
 
     /**
-     * Task scan unread SMS định kỳ.
+     * Task scan SMS định kỳ (lấy tin nhắn mới nhất từ toàn bộ SMS trên SIM).
      */
-    private ScheduledFuture<?> unreadPollFuture;
+    private ScheduledFuture<?> latestSmsPollFuture;
 
     /**
-     * Chống overlap nhiều lần scan unread SMS.
+     * Chống overlap nhiều lần scan cùng lúc.
      *
      * Ví dụ:
      * - Scan cũ chưa xong
@@ -103,7 +93,7 @@ public class SmsReaderRuntime implements ApplicationRunner {
      *
      * => bỏ qua để tránh queue bị dồn.
      */
-    private final AtomicBoolean unreadPollInProgress = new AtomicBoolean(false);
+    private final AtomicBoolean latestSmsPollInProgress = new AtomicBoolean(false);
 
     /**
      * Entry point khi application start.
@@ -111,11 +101,10 @@ public class SmsReaderRuntime implements ApplicationRunner {
      * Flow startup:
      * 1. Start serial reader
      * 2. Initialize modem
-     * 3. Start polling SMS mới
-     * 4. Start scheduler scan unread SMS
+     * 3. Start polling SMS mới (CMTI event)
+     * 4. Start scheduler scan định kỳ (lấy tin nhắn mới nhất từ ALL SMS)
      */
-    @Override
-    public void run(ApplicationArguments args) throws Exception {
+    public void run() throws Exception {
 
         log.info("Available serial ports: {}", SerialPortManager.listAvailablePorts());
 
@@ -138,15 +127,18 @@ public class SmsReaderRuntime implements ApplicationRunner {
         pollThread.start();
 
         /**
-         * Scheduler scan SMS unread định kỳ.
+         * Scheduler scan SMS định kỳ.
          *
          * Đây là cơ chế fallback:
-         * - Tránh miss SMS do mất event modem
-         * - Recover SMS chưa xử lý
+         * - Đọc toàn bộ SMS trên SIM (AT+CMGL="ALL")
+         * - Lấy index mới nhất (số lớn nhất) để process
+         * - Tránh miss SMS do mất CMTI event hoặc process restart
          */
-        unreadPollFuture = taskScheduler.scheduleAtFixedRate(
-                this::scheduleUnreadPoll,
-                Duration.ofMillis(appConfig.getUnreadPollIntervalMs()));
+        latestSmsPollFuture = scheduler.scheduleAtFixedRate(
+                this::scheduleLatestSmsPoll,
+                appConfig.getUnreadPollIntervalMs(),
+                appConfig.getUnreadPollIntervalMs(),
+                TimeUnit.MILLISECONDS);
 
         log.info("SMS reader runtime started.");
     }
@@ -183,7 +175,7 @@ public class SmsReaderRuntime implements ApplicationRunner {
 
             try {
 
-                Thread.sleep(POLL_INTERVAL_MS);
+                Thread.sleep(appConfig.getPollIntervalMs());
 
             } catch (InterruptedException e) {
 
@@ -212,6 +204,11 @@ public class SmsReaderRuntime implements ApplicationRunner {
         Optional<SmsMessage> msgOpt = smsService.readAndParse(index);
 
         msgOpt.ifPresent(msg -> {
+
+            // Gửi Telegram notification ngay lập tức, độc lập với Redis.
+            // Kể cả khi Redis fail, Telegram vẫn được gửi.
+            telegramNotifier.notifyAsync(msg);
+
             try {
 
                 // Publish realtime sang Redis
@@ -226,18 +223,17 @@ public class SmsReaderRuntime implements ApplicationRunner {
                         "Redis publish failed for SMS index={}: {}",
                         index,
                         e.getMessage(),
-                        e
-                );
+                        e);
             }
         });
     }
 
     /**
-     * Schedule unread SMS scan an toàn.
+     * Schedule scan SMS an toàn, chống overlap nhiều task scan cùng lúc.
      *
-     * Chống overlap nhiều task scan cùng lúc.
+     * Thực hiện AT+CMGL="ALL", lấy index mới nhất và xử lý.
      */
-    private void scheduleUnreadPoll() {
+    private void scheduleLatestSmsPoll() {
 
         if (!running) {
             return;
@@ -246,11 +242,9 @@ public class SmsReaderRuntime implements ApplicationRunner {
         /**
          * Nếu đang có scan chạy thì skip.
          */
-        if (!unreadPollInProgress.compareAndSet(false, true)) {
+        if (!latestSmsPollInProgress.compareAndSet(false, true)) {
 
-            log.info(
-                    "Skipping unread SMS schedule because the previous run is still queued/running."
-            );
+            log.debug("Skipping SMS scan schedule because the previous run is still queued/running.");
 
             return;
         }
@@ -261,83 +255,100 @@ public class SmsReaderRuntime implements ApplicationRunner {
              * Submit scan vào command executor
              * để serialize modem access.
              */
-            commandExecutor.submit(this::processScheduledUnreadSms);
+            commandExecutor.submit(this::processScheduledLatestSms);
 
         } catch (Exception e) {
 
-            unreadPollInProgress.set(false);
+            latestSmsPollInProgress.set(false);
 
             log.warn(
-                    "Could not submit unread SMS schedule: {}",
-                    e.getMessage()
-            );
+                    "Could not submit SMS scan schedule: {}",
+                    e.getMessage());
         }
     }
 
     /**
-     * Scan SMS unread định kỳ.
+     * Scan toàn bộ SMS trên SIM, sắp xếp theo timestamp thực tế, và chỉ publish
+     * SMS mới hơn state hiện tại trong Redis (tránh duplicate).
      *
-     * Đây là cơ chế recovery chống miss SMS.
+     * <p>
+     * KHÔNG dùng «index lớn nhất = tin mới nhất» vì modem tái sử dụng slot
+     * sau khi xóa: index thấp có thể là tin mới hơn. Timestamp từ nội dung SMS
+     * là nguồn sự thật về thứ tự thời gian.
+     * </p>
+     *
+     * <p>
+     * Xử lý toàn bộ tin OTP hiện có trên SIM (không chỉ 1 tin) để
+     * tránh miss SMS bất kể việc phân bổ index như thế nào.
+     * </p>
      */
-    private void processScheduledUnreadSms() {
+    private void processScheduledLatestSms() {
 
         try {
 
-            List<Integer> unreadIndexes = smsService.listUnreadIndexes();
+            List<com.example.sms.smsreader.SmsMessage> allMessages = smsService.readAndParseAll();
 
-            if (unreadIndexes.isEmpty()) {
+            if (allMessages.isEmpty()) {
 
-                log.info("Scheduled unread SMS scan found no messages.");
-                return;
-            }
+                log.debug("Scheduled SMS scan: no OTP messages found on SIM.");
 
-            log.info(
-                    "Scheduled unread SMS scan found indexes: {}",
-                    unreadIndexes
-            );
+            } else {
 
-            for (int index : unreadIndexes) {
+                // Danh sách đã sắp xếp timestamp tăng dần;
+                // chỉ cần publish tin mới nhất (cuối list) qua conditional check.
+                com.example.sms.smsreader.SmsMessage latestMsg = allMessages.get(allMessages.size() - 1);
+                log.info("Scheduled SMS scan: {} OTP SMS found, latest is index={} timestamp={}.",
+                        allMessages.size(), latestMsg.getIndex(), latestMsg.getTimestamp());
 
-                Optional<SmsMessage> msgOpt = smsService.readAndParse(index);
+                try {
 
-                msgOpt.ifPresent(msg -> {
-                    try {
-
-                        /**
-                         * Chỉ publish nếu SMS mới hơn current state.
-                         *
-                         * Mục đích:
-                         * - Tránh duplicate message
-                         * - Tránh republish SMS cũ
-                         */
-                        redisPublisher.publishIfNewerThanCurrent(msg);
-
-                    } catch (Exception e) {
-
-                        log.error(
-                                "Conditional Redis publish failed for scheduled SMS index={}: {}",
-                                index,
-                                e.getMessage(),
-                                e
-                        );
+                    /**
+                     * Chỉ publish nếu SMS mới hơn current state.
+                     *
+                     * Mục đích:
+                     * - Tránh duplicate message
+                     * - Tránh republish SMS cũ
+                     */
+                    boolean published = redisPublisher.publishIfNewerThanCurrent(latestMsg);
+                    // Gửi Telegram notify nếu SMS thực sự được publish (mới hơn state hiện tại)
+                    if (published) {
+                        telegramNotifier.notifyAsync(latestMsg);
                     }
-                });
+
+                } catch (Exception e) {
+
+                    log.error(
+                            "Conditional Redis publish failed for scheduled SMS index={}: {}",
+                            latestMsg.getIndex(),
+                            e.getMessage(),
+                            e);
+                }
+
+                // Xóa các SMS đã được xử lý nếu cấu hình bật DELETE_SMS_AFTER_READ
+                if (appConfig.isDeleteSmsAfterRead()) {
+                    for (com.example.sms.smsreader.SmsMessage msg : allMessages) {
+                        smsService.deleteSms(msg.getIndex());
+                    }
+                }
             }
+
+            // Cleanup SIM nếu vượt ngưỡng watermark — dùng list đã đọc sẵn,
+            // không cần đọc lại SIM lần thứ hai.
+            smsService.cleanupOldSms(allMessages);
 
         } catch (Exception e) {
 
             log.error(
-                    "Scheduled unread SMS scan failed: {}",
+                    "Scheduled SMS scan failed: {}",
                     e.getMessage(),
-                    e
-            );
+                    e);
 
         } finally {
 
             /**
              * Luôn release lock dù success/fail.
              */
-            unreadPollInProgress.set(false);
+            latestSmsPollInProgress.set(false);
         }
     }
 
@@ -351,7 +362,6 @@ public class SmsReaderRuntime implements ApplicationRunner {
      * 4. Stop serial reader service
      * 5. Đóng serial port và giải phóng resource
      */
-    @PreDestroy
     public void shutdown() {
 
         /**
@@ -371,8 +381,8 @@ public class SmsReaderRuntime implements ApplicationRunner {
         }
 
         // Cancel scheduler task
-        if (unreadPollFuture != null) {
-            unreadPollFuture.cancel(false);
+        if (latestSmsPollFuture != null) {
+            latestSmsPollFuture.cancel(false);
         }
 
         // Graceful shutdown executor

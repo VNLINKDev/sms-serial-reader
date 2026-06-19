@@ -1,21 +1,148 @@
 package com.example.sms;
 
 import com.example.sms.config.AppConfig;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import com.example.sms.serial.SerialPortManager;
+import com.example.sms.serial.RxBuffer;
+import com.example.sms.serial.SerialReaderService;
+import com.example.sms.serial.AtCommandClient;
+import com.example.sms.modem.ModemInitializer;
+import com.example.sms.modem.SmsIndexDetector;
+import com.example.sms.smsreader.SmsParser;
+import com.example.sms.smsreader.SmsService;
+import com.example.sms.redis.RedisPublisher;
+import com.example.sms.telegram.TelegramNotifier;
+import com.example.sms.app.SmsReaderRuntime;
+import com.example.sms.health.HealthCheckServer;
+
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
- * Bootstrap class của Spring Boot application.
+ * Entry Point (Bootstrap Class) của ứng dụng Java SE thuần.
  *
- * {@link EnableConfigurationProperties} đăng ký {@link AppConfig} để toàn bộ
- * cấu hình {@code sms.*} được bind và validate khi application context khởi tạo.
+ * Chịu trách nhiệm khởi tạo cấu hình, kết nối Serial Port, Redis,
+ * HTTP check health server, Scheduler quét tin nhắn và điều phối chính
+ * (Runtime).
  */
-@SpringBootApplication
-@EnableConfigurationProperties(AppConfig.class)
 public class SmsReaderApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(SmsReaderApplication.class, args);
+        System.out.println("==================================================");
+        System.out.println("Starting pure Java SMS Serial Reader (Vanilla)...");
+        System.out.println("==================================================");
+
+        // 1. Khởi tạo cấu hình từ biến môi trường
+        AppConfig config = new AppConfig();
+
+        // 2. Khởi tạo và mở cổng Serial Port
+        SerialPortManager portManager = new SerialPortManager(config);
+        try {
+            portManager.open();
+        } catch (Exception e) {
+            System.err.println("CRITICAL: Failed to open serial port on startup: " + e.getMessage());
+            System.exit(1);
+        }
+
+        RxBuffer rxBuffer = new RxBuffer();
+        SerialReaderService readerService = new SerialReaderService(portManager, rxBuffer);
+
+        // 3. Khởi tạo Modem và Client gửi AT Command
+        AtCommandClient atClient = new AtCommandClient(portManager, rxBuffer);
+        ModemInitializer modemInitializer = new ModemInitializer(atClient);
+        SmsIndexDetector indexDetector = new SmsIndexDetector(rxBuffer, config.getSmsIndexCmtiPattern());
+
+        // 4. Khởi tạo Service xử lý nghiệp vụ SMS
+        SmsParser smsParser = new SmsParser(config.getSmsOtpPattern());
+        SmsService smsService = new SmsService(atClient, smsParser, config);
+
+        // 5. Khởi tạo Redis integration
+        RedisPublisher redisPublisher = new RedisPublisher(config);
+        try {
+            redisPublisher.connect();
+        } catch (Exception e) {
+            System.err.println("CRITICAL: Failed to connect to Redis on startup: " + e.getMessage());
+            portManager.close();
+            System.exit(1);
+        }
+
+        // 6. Khởi tạo Scheduler (Thay thế cho TaskScheduler của Spring)
+        // Sử dụng ThreadFactory thông thường, tương thích Java 11+
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(
+                2,
+                r -> {
+                    Thread t = new Thread(r);
+                    t.setName("sms-unread-scheduler-" + t.getId());
+                    t.setDaemon(true);
+                    return t;
+                });
+
+        // 7. Khởi chạy HTTP Server Check Health siêu nhẹ
+        HealthCheckServer healthServer = new HealthCheckServer(portManager, readerService, redisPublisher, config);
+        int httpPort = getPortFromEnv();
+        healthServer.start(httpPort);
+
+        // 8. Khởi tạo Telegram Notifier (gửi notification khi nhận OTP)
+        TelegramNotifier telegramNotifier = new TelegramNotifier(config);
+
+        // 9. Khởi chạy Core Runtime
+        SmsReaderRuntime runtime = new SmsReaderRuntime(
+                portManager, readerService, modemInitializer, indexDetector,
+                smsService, redisPublisher, telegramNotifier, scheduler, config);
+
+        try {
+            runtime.run();
+        } catch (Exception e) {
+            System.err.println("CRITICAL: SMS Reader Runtime run failed: " + e.getMessage());
+            redisPublisher.close();
+            portManager.close();
+            healthServer.stop();
+            scheduler.shutdown();
+            System.exit(1);
+        }
+
+        // 9. Đăng ký JVM Shutdown Hook để tắt ứng dụng an toàn (Graceful Shutdown)
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.println("==================================================");
+            System.out.println("JVM Shutdown Hook triggered. Shutting down gracefully...");
+            System.out.println("==================================================");
+
+            try {
+                runtime.shutdown();
+            } catch (Exception e) {
+                System.err.println("Error shutting down runtime: " + e.getMessage());
+            }
+
+            try {
+                redisPublisher.close();
+            } catch (Exception e) {
+                System.err.println("Error closing Redis publisher: " + e.getMessage());
+            }
+
+            try {
+                healthServer.stop();
+            } catch (Exception e) {
+                System.err.println("Error stopping health check server: " + e.getMessage());
+            }
+
+            try {
+                scheduler.shutdown();
+            } catch (Exception e) {
+                System.err.println("Error shutting down scheduler: " + e.getMessage());
+            }
+
+            System.out.println("Shutdown complete. Bye!");
+        }));
+    }
+
+    private static int getPortFromEnv() {
+        String serverPort = System.getenv("SERVER_PORT");
+        if (serverPort != null && !serverPort.isBlank()) {
+            try {
+                return Integer.parseInt(serverPort.trim());
+            } catch (NumberFormatException e) {
+                // fallback về 8080
+            }
+        }
+        return 8080;
     }
 }

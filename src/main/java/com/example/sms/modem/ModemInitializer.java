@@ -4,17 +4,13 @@ import com.example.sms.serial.AtCommandClient;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 /**
  * Gửi chuỗi lệnh AT khởi tạo chuẩn để đưa modem về trạng thái đã biết
  * và sẵn sàng hoạt động.
  *
- * Bean này không tự chạy khi khởi tạo Spring context; {@link
- * com.example.sms.app.SmsReaderRuntime} gọi nó sau khi serial reader đã start
- * để bảo đảm response init không bị mất khỏi buffer.
+ * Lớp reader Service đã start để bảo đảm response init không bị mất khỏi buffer.
  */
-@Component
 @RequiredArgsConstructor
 public class ModemInitializer {
 

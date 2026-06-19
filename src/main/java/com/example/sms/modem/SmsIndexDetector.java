@@ -9,7 +9,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.springframework.stereotype.Component;
 
 /**
  * Quét {@link RxBuffer} dùng chung để tìm mã kết quả tự phát {@code +CMTI}
@@ -25,20 +24,17 @@ import org.springframework.stereotype.Component;
  * NOTE: Detector chỉ parse notification, không đọc SMS. Việc đọc nội dung
  * phải được đưa qua executor tuần tự để không cạnh tranh với AT command khác.
  */
-@Component
-@RequiredArgsConstructor
 public class SmsIndexDetector {
 
     private static final Logger log = LoggerFactory.getLogger(SmsIndexDetector.class);
 
-    /**
-     * Khớp {@code +CMTI: "SM",12}, {@code +CMTI: "ME",3}, v.v.
-     * Nhóm bắt 1 = chỉ số SMS dạng số nguyên.
-     */
-    private static final Pattern CMTI_PATTERN =
-            Pattern.compile("\\+CMTI:\\s*\"[^\"]+\",(\\d+)");
-
     private final RxBuffer rxBuffer;
+    private final Pattern cmtiPattern;
+
+    public SmsIndexDetector(RxBuffer rxBuffer, String cmtiPatternRegex) {
+        this.rxBuffer = rxBuffer;
+        this.cmtiPattern = Pattern.compile(cmtiPatternRegex);
+    }
 
     /**
      * Quét dữ liệu hiện có trong buffer để tìm thông báo {@code +CMTI}.
@@ -60,7 +56,7 @@ public class SmsIndexDetector {
             endAbsolute = rxBuffer.currentAbsoluteOffset();
         }
 
-        Matcher m       = CMTI_PATTERN.matcher(content);
+        Matcher m       = cmtiPattern.matcher(content);
         int     lastEnd = 0;
 
         while (m.find()) {

@@ -3,11 +3,9 @@ package com.example.sms.serial;
 import com.example.sms.exception.SerialPortException;
 import com.example.sms.config.AppConfig;
 import com.fazecast.jSerialComm.SerialPort;
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -18,11 +16,9 @@ import java.util.stream.Collectors;
  * Quản lý lifecycle của {@link SerialPort}: chọn port theo cấu hình, mở port,
  * cấu hình thông số truyền, expose input/output stream và đóng tài nguyên.
  *
- * Bean được mở ở {@link PostConstruct} để application fail fast nếu modem
- * hoặc quyền truy cập serial không sẵn sàng. Các lớp cao hơn chỉ làm việc với
- * stream đã được kiểm tra trạng thái, không tự mở/đóng port.
+ * Các lớp cao hơn chỉ làm việc với stream đã được kiểm tra trạng thái,
+ * không tự mở/đóng port.
  */
-@Component
 @RequiredArgsConstructor
 public class SerialPortManager implements AutoCloseable {
 
@@ -78,11 +74,6 @@ public class SerialPortManager implements AutoCloseable {
         log.info("Serial port {} opened successfully.", portName);
     }
 
-    @PostConstruct
-    void init() {
-        open();
-    }
-
     /**
      * Đóng stream trước rồi mới đóng port vật lý để driver có cơ hội flush/giải
      * phóng handle theo thứ tự ổn định.
@@ -96,6 +87,21 @@ public class SerialPortManager implements AutoCloseable {
             port.closePort();
             log.info("Serial port {} closed.", config.getSerialPort());
         }
+    }
+
+    /**
+     * Đóng port hiện tại và mở lại từ đầu.
+     *
+     * Được gọi bởi {@link SerialReaderService} khi phát hiện lỗi đọc
+     * (ví dụ: USB modem bị ngắt rồi cắm lại). Luồng gọi có trách nhiệm
+     * chờ một khoảng delay trước khi gọi reconnect để tránh hot-loop.
+     *
+     * @throws SerialPortException nếu không mở lại được port.
+     */
+    public void reconnect() {
+        log.warn("Reconnecting serial port '{}'...", config.getSerialPort());
+        close();
+        open();
     }
 
     // -------------------------------------------------------------------------
@@ -114,6 +120,11 @@ public class SerialPortManager implements AutoCloseable {
 
     public boolean isOpen() {
         return port != null && port.isOpen();
+    }
+
+    /** Tên cổng serial đang được cấu hình (dùng để log từ các lớp khác). */
+    public String getPortName() {
+        return config.getSerialPort();
     }
 
     // -------------------------------------------------------------------------

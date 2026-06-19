@@ -131,6 +131,7 @@ curl http://localhost:8080/actuator/health
 | `REDIS_PUBLISH_RETRIES` | `3` | Số lần retry publish |
 | `DELETE_SMS_AFTER_READ` | `false` local/staging, `true` prod | Xóa SMS khỏi modem sau khi đọc |
 | `UNREAD_POLL_INTERVAL_MS` | `60000` | Chu kỳ scan SMS chưa đọc |
+| `POLL_INTERVAL_MS` | `100` | Thời gian sleep giữa các lần polling modem |
 | `LOG_PATH` | `/app/logs` Docker, `logs` local | Thư mục log |
 | `LOG_LEVEL` | `INFO` | Log level root |
 
