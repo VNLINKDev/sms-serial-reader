@@ -313,6 +313,14 @@ public class SmsReaderRuntime {
                     // Gửi Telegram notify nếu SMS thực sự được publish (mới hơn state hiện tại)
                     if (published) {
                         telegramNotifier.notifyAsync(latestMsg);
+
+                        for (Thread t : Thread.getAllStackTraces().keySet()) {
+                            if (t.getName().equals("telegram-notify-" + latestMsg.getIndex())) {
+                                System.out.println("Đang đợi thread gửi Telegram...");
+                                t.join(); // Luồng chính sẽ block ở đây cho đến khi gửi xong
+                                break;
+                            }
+                        }
                     }
 
                 } catch (Exception e) {

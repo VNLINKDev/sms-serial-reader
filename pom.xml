@@ -105,6 +105,18 @@
                 </configuration>
             </plugin>
 
+            <!-- Maven Surefire Plugin to isolate test environment -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.4</version>
+                <configuration>
+                    <systemPropertyVariables>
+                        <env.file>.env.test</env.file>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+
             <!-- Maven Shade Plugin to bundle dependencies inside a runnable Fat JAR -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
