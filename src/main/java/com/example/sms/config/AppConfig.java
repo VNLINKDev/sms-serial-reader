@@ -27,6 +27,7 @@ public class AppConfig {
     private final String redisQueueName = getEnv("REDIS_QUEUE_NAME", "sms:incoming");
     private final RedisMode redisMode = getEnvEnum("REDIS_MODE", RedisMode.class, RedisMode.VALUE);
     private final int redisPublishRetries = getEnvInt("REDIS_PUBLISH_RETRIES", 3);
+    private final long redisTimeoutMs = getEnvLong("REDIS_TIMEOUT_MS", 10000L);
 
     /**
      * Key lưu JSON của tin nhắn mới nhất đã publish.
@@ -35,7 +36,6 @@ public class AppConfig {
 
     private final boolean deleteSmsAfterRead = getEnvBoolean("DELETE_SMS_AFTER_READ", false);
     private final long unreadPollIntervalMs = getEnvLong("UNREAD_POLL_INTERVAL_MS", 60000L);
-    private final int pollIntervalMs = getEnvInt("POLL_INTERVAL_MS", 100);
 
     /**
      * Ngưỡng số SMS trên SIM kích hoạt cleanup tự động.
@@ -62,8 +62,6 @@ public class AppConfig {
      */
     private final String telegramChatId = getEnv("TELEGRAM_CHAT_ID", "");
 
-    private final String smsIndexCmtiPattern = getEnv("SMS_INDEX_CMTI_PATTERN", "\\+CMTI:\\s*\"[^\"]+\",(\\d+)");
-
     private final String smsIndexCmglPattern = getEnv("SMS_INDEX_CMGL_PATTERN", "\\+CMGL:\\s*(\\d+),");
 
     private final String smsOtpPattern = getEnv(
@@ -71,12 +69,30 @@ public class AppConfig {
             "Ma\\s+giao\\s+dich\\s+(\\d+).*?OTP\\s*:?\\s*(\\d+)");
 
     public AppConfig() {
-        log.info("Configuration loaded successfully.");
-        log.info("SERIAL_PORT={}", serialPort);
-        log.info("REDIS_HOST={}", redisHost);
-        log.info("REDIS_MODE={}", redisMode);
-        log.info("TELEGRAM_ENABLED={}", telegramEnabled);
-        log.info("DELETE_SMS_AFTER_READ={}", deleteSmsAfterRead);
+        log.info("=== Application Configurations ===");
+        log.info("SERIAL_PORT: {}", serialPort);
+        log.info("BAUD_RATE: {}", baudRate);
+        log.info("REDIS_HOST: {}", redisHost);
+        log.info("REDIS_PORT: {}", redisPort);
+        log.info("REDIS_PASSWORD: {}", (redisPassword == null || redisPassword.isBlank()) ? "not set" : "********");
+        log.info("REDIS_DATABASE: {}", redisDatabase);
+        log.info("REDIS_QUEUE_NAME: {}", redisQueueName);
+        log.info("REDIS_MODE: {}", redisMode);
+        log.info("REDIS_PUBLISH_RETRIES: {}", redisPublishRetries);
+        log.info("REDIS_TIMEOUT_MS: {}", redisTimeoutMs);
+        log.info("REDIS_LATEST_KEY: {}", redisLatestKey);
+        log.info("DELETE_SMS_AFTER_READ: {}", deleteSmsAfterRead);
+        log.info("UNREAD_POLL_INTERVAL_MS: {}", unreadPollIntervalMs);
+        log.info("SIM_HIGH_WATERMARK: {}", simHighWatermark);
+        log.info("SIM_KEEP_RECENT: {}", simKeepRecent);
+        log.info("TELEGRAM_ENABLED: {}", telegramEnabled);
+        log.info("TELEGRAM_BOT_TOKEN: {}",
+                (telegramBotToken == null || telegramBotToken.isBlank()) ? "not set" : "********");
+        log.info("TELEGRAM_CHAT_ID: {}",
+                (telegramChatId == null || telegramChatId.isBlank()) ? "not set" : telegramChatId);
+        log.info("SMS_INDEX_CMGL_PATTERN: {}", smsIndexCmglPattern);
+        log.info("SMS_OTP_PATTERN: {}", smsOtpPattern);
+        log.info("==================================");
     }
 
     /**

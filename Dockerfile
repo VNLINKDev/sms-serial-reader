@@ -11,7 +11,7 @@ FROM eclipse-temurin:21-jre-jammy
 
 ARG APP_VERSION=1.0.0
 ENV APP_HOME=/app \
-    JAVA_OPTS="-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError" \
+    JAVA_OPTS="-XX:MaxRAMPercentage=50 -XX:+UseSerialGC -Xss256k -XX:TieredStopAtLevel=1 -XX:+ExitOnOutOfMemoryError" \
     SPRING_PROFILES_ACTIVE=prod \
     SERVER_PORT=8080 \
     LOG_PATH=/app/logs

@@ -65,7 +65,7 @@ set +o allexport
 
 # Lấy SERVER_PORT từ env, mặc định 8080
 SERVER_PORT="${SERVER_PORT:-8080}"
-JAVA_OPTS="${JAVA_OPTS:--XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError}"
+JAVA_OPTS="${JAVA_OPTS:--XX:MaxRAMPercentage=50 -XX:+UseSerialGC -Xss256k -XX:TieredStopAtLevel=1 -XX:+ExitOnOutOfMemoryError}"
 
 echo -e "  JAR     : ${JAR_FILE}"
 echo -e "  ENV     : ${ENV_FILE}"

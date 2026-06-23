@@ -6,16 +6,16 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
 /**
  * Gateway cấp thấp để gửi AT command tới modem GSM qua serial port.
  *
- * Lớp này không tự tạo lock ở cấp command vì runtime đã serialize tất cả
- * modem command qua single-thread executor. Ranh giới trách nhiệm ở đây là:
- * lấy offset hiện tại của {@link RxBuffer}, ghi command xuống output stream,
- * rồi chờ phần response xuất hiện sau offset đó.
+ * Đọc response trực tiếp từ InputStream của serial port, không dùng buffer
+ * trung gian. Trước mỗi command, stale data trong serial buffer được drain
+ * để tránh response cũ/unsolicited notification ảnh hưởng kết quả.
  *
  * NOTE: Nếu caller gọi class này đồng thời từ nhiều thread, response có thể
  * bị match sai vì modem không gắn correlation id cho từng command. Luôn gọi qua
@@ -29,7 +29,6 @@ public class AtCommandClient {
     private static final int DEFAULT_TIMEOUT_MS = 8_000;
 
     private final SerialPortManager portManager;
-    private final RxBuffer     rxBuffer;
 
     // -------------------------------------------------------------------------
     // API công khai
@@ -47,17 +46,15 @@ public class AtCommandClient {
     }
 
     /**
-     * Gửi {@code command} và chờ response kết thúc sau offset hiện tại của buffer.
+     * Xả stale data, gửi {@code command} rồi chờ response kết thúc.
      *
-     * Offset được lấy trước khi ghi command để bỏ qua dữ liệu cũ còn trong
-     * buffer, đồng thời vẫn nhận được toàn bộ response phát sinh sau command.
+     * Drain trước khi gửi để loại bỏ unsolicited notification (+CMTI, ...)
+     * hoặc phần response cũ còn sót trong serial buffer.
      */
     public String sendAndWait(String command, int timeoutMs) {
-        long startAbsolute = rxBuffer.currentAbsoluteOffset();
-
+        drainStaleData();
         sendRaw(command);
-
-        return rxBuffer.waitForTerminatedResponse(startAbsolute, timeoutMs, command);
+        return readResponse(timeoutMs, command);
     }
 
     /**
@@ -79,6 +76,116 @@ public class AtCommandClient {
             log.debug("[TX] {}", command);
         } catch (Exception e) {
             throw new SerialPortException("Failed to write command '" + command + "': " + e.getMessage(), e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Đọc response trực tiếp từ serial port
+    // -------------------------------------------------------------------------
+
+    /**
+     * Đọc response trực tiếp từ serial port cho đến khi gặp terminator
+     * (OK / ERROR) hoặc hết timeout.
+     *
+     * Vòng lặp đọc sử dụng serial port ở chế độ semi-blocking (timeout 5s mỗi
+     * lần read). Khi {@code is.read()} trả về 0 (hết timeout mà chưa có data),
+     * sleep 50ms rồi thử lại — tránh busy-spin nếu driver trả 0 ngay lập tức.
+     *
+     * @throws ModemTimeoutException khi hết thời gian chờ.
+     * @throws SerialPortException   khi serial port stream bị đóng hoặc lỗi I/O.
+     */
+    private String readResponse(int timeoutMs, String command) {
+        InputStream is = portManager.getInputStream();
+        StringBuilder response = new StringBuilder();
+        byte[] buf = new byte[4096];
+        long deadline = System.currentTimeMillis() + timeoutMs;
+
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                int n = is.read(buf);
+
+                if (n < 0) {
+                    throw new SerialPortException(
+                            "Serial port stream closed while waiting for response to: " + command);
+                }
+
+                if (n == 0) {
+                    // Semi-blocking read timeout — không có data, chờ rồi thử lại.
+                    // Sleep ngắn để tránh busy-spin nếu driver trả 0 ngay lập tức.
+                    sleepQuietly(50);
+                    continue;
+                }
+
+                response.append(new String(buf, 0, n, StandardCharsets.US_ASCII));
+
+                String responseStr = response.toString();
+                if (isTerminated(responseStr)) {
+                    log.debug("[RX] {}", responseStr.trim());
+                    return responseStr;
+                }
+
+            } catch (ModemTimeoutException | SerialPortException e) {
+                throw e;
+            } catch (Exception e) {
+                if (isReadTimeout(e)) {
+                    continue; // timeout bán-blocking bình thường
+                }
+                throw new SerialPortException(
+                        "Read error while waiting for response to '" + command + "': " + e.getMessage(), e);
+            }
+        }
+
+        throw new ModemTimeoutException(command, timeoutMs);
+    }
+
+    /**
+     * Xả dữ liệu cũ trong serial port input buffer trước khi gửi command mới.
+     *
+     * Tránh stale data từ unsolicited notification (+CMTI, ...) hoặc response
+     * lệnh cũ ảnh hưởng đến response của lệnh tiếp theo.
+     */
+    private void drainStaleData() {
+        try {
+            InputStream is = portManager.getInputStream();
+            byte[] buf = new byte[4096];
+            int available = is.available();
+            while (available > 0) {
+                int read = is.read(buf, 0, Math.min(available, buf.length));
+                if (read <= 0)
+                    break;
+                log.debug("Drained {} stale bytes from serial port.", read);
+                available = is.available();
+            }
+        } catch (Exception e) {
+            log.debug("Failed to drain stale data (non-critical): {}", e.getMessage());
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Hàm hỗ trợ
+    // -------------------------------------------------------------------------
+
+    private static boolean isTerminated(String s) {
+        return s.contains("\r\nOK\r\n")
+                || s.contains("\nOK\r\n")
+                || s.contains("\r\nERROR\r\n")
+                || s.contains("+CME ERROR")
+                || s.contains("+CMS ERROR");
+    }
+
+    private static boolean isReadTimeout(Exception e) {
+        String msg = e.getMessage();
+        if (msg == null)
+            return false;
+        String lower = msg.toLowerCase();
+        return lower.contains("timed out") || lower.contains("timeout");
+    }
+
+    private static void sleepQuietly(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 }

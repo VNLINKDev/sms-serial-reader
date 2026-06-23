@@ -92,7 +92,7 @@ public class SerialPortManager implements AutoCloseable {
     /**
      * Đóng port hiện tại và mở lại từ đầu.
      *
-     * Được gọi bởi {@link SerialReaderService} khi phát hiện lỗi đọc
+     * Đóng port hiện tại và mở lại khi phát hiện lỗi đọc
      * (ví dụ: USB modem bị ngắt rồi cắm lại). Luồng gọi có trách nhiệm
      * chờ một khoảng delay trước khi gọi reconnect để tránh hot-loop.
      *

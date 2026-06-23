@@ -2,11 +2,8 @@ package com.example.sms;
 
 import com.example.sms.config.AppConfig;
 import com.example.sms.serial.SerialPortManager;
-import com.example.sms.serial.RxBuffer;
-import com.example.sms.serial.SerialReaderService;
 import com.example.sms.serial.AtCommandClient;
 import com.example.sms.modem.ModemInitializer;
-import com.example.sms.modem.SmsIndexDetector;
 import com.example.sms.smsreader.SmsParser;
 import com.example.sms.smsreader.SmsService;
 import com.example.sms.redis.RedisPublisher;
@@ -43,13 +40,9 @@ public class SmsReaderApplication {
             System.exit(1);
         }
 
-        RxBuffer rxBuffer = new RxBuffer();
-        SerialReaderService readerService = new SerialReaderService(portManager, rxBuffer);
-
-        // 3. Khởi tạo Modem và Client gửi AT Command
-        AtCommandClient atClient = new AtCommandClient(portManager, rxBuffer);
+        // 3. Khởi tạo AT Command Client (đọc/ghi trực tiếp serial port)
+        AtCommandClient atClient = new AtCommandClient(portManager);
         ModemInitializer modemInitializer = new ModemInitializer(atClient);
-        SmsIndexDetector indexDetector = new SmsIndexDetector(rxBuffer, config.getSmsIndexCmtiPattern());
 
         // 4. Khởi tạo Service xử lý nghiệp vụ SMS
         SmsParser smsParser = new SmsParser(config.getSmsOtpPattern());
@@ -71,28 +64,29 @@ public class SmsReaderApplication {
                 2,
                 r -> {
                     Thread t = new Thread(r);
-                    t.setName("sms-unread-scheduler-" + t.getId());
+                    t.setName("sms-scan-scheduler-" + t.getId());
                     t.setDaemon(true);
                     return t;
                 });
 
         // 7. Khởi chạy HTTP Server Check Health siêu nhẹ
-        HealthCheckServer healthServer = new HealthCheckServer(portManager, readerService, redisPublisher, config);
+        HealthCheckServer healthServer = new HealthCheckServer(portManager, redisPublisher, config);
         int httpPort = getPortFromEnv();
         healthServer.start(httpPort);
 
         // 8. Khởi tạo Telegram Notifier (gửi notification khi nhận OTP)
         TelegramNotifier telegramNotifier = new TelegramNotifier(config);
 
-        // 9. Khởi chạy Core Runtime
+        // 9. Khởi chạy Core Runtime (chỉ dùng scheduled scan định kỳ)
         SmsReaderRuntime runtime = new SmsReaderRuntime(
-                portManager, readerService, modemInitializer, indexDetector,
+                portManager, modemInitializer,
                 smsService, redisPublisher, telegramNotifier, scheduler, config);
 
         try {
             runtime.run();
         } catch (Exception e) {
             System.err.println("CRITICAL: SMS Reader Runtime run failed: " + e.getMessage());
+            telegramNotifier.shutdown();
             redisPublisher.close();
             portManager.close();
             healthServer.stop();
@@ -100,7 +94,7 @@ public class SmsReaderApplication {
             System.exit(1);
         }
 
-        // 9. Đăng ký JVM Shutdown Hook để tắt ứng dụng an toàn (Graceful Shutdown)
+        // 10. Đăng ký JVM Shutdown Hook để tắt ứng dụng an toàn (Graceful Shutdown)
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("==================================================");
             System.out.println("JVM Shutdown Hook triggered. Shutting down gracefully...");
@@ -110,6 +104,12 @@ public class SmsReaderApplication {
                 runtime.shutdown();
             } catch (Exception e) {
                 System.err.println("Error shutting down runtime: " + e.getMessage());
+            }
+
+            try {
+                telegramNotifier.shutdown();
+            } catch (Exception e) {
+                System.err.println("Error shutting down Telegram notifier: " + e.getMessage());
             }
 
             try {

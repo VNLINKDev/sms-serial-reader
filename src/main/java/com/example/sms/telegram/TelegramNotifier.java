@@ -14,13 +14,17 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Gửi background notification lên Telegram group khi nhận OTP SMS.
  *
  * <p>Sử dụng Telegram Bot API endpoint {@code sendMessage} qua HTTPS POST.
- * Gửi bất đồng bộ (fire-and-forget) trên virtual thread để không block
- * luồng xử lý SMS chính. Lỗi gửi Telegram chỉ log warn, không throw.</p>
+ * Gửi bất đồng bộ (fire-and-forget) trên single-thread executor để không block
+ * luồng xử lý SMS chính và tránh thread leak. Lỗi gửi Telegram chỉ log warn,
+ * không throw.</p>
  *
  * <p>Tính năng được bật/tắt qua env var {@code TELEGRAM_ENABLED}.</p>
  */
@@ -36,6 +40,18 @@ public class TelegramNotifier {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
+    /**
+     * Single-thread executor xử lý tất cả Telegram notification tuần tự.
+     *
+     * Thay vì tạo thread mới cho mỗi SMS (gây thread leak khi chạy lâu),
+     * sử dụng executor cố định để đảm bảo resource không bị rò rỉ.
+     */
+    private final ExecutorService notifyExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "telegram-notifier");
+        t.setDaemon(true);
+        return t;
+    });
+
     public TelegramNotifier(AppConfig config) {
         this.config = config;
         this.httpClient = HttpClient.newBuilder()
@@ -47,7 +63,7 @@ public class TelegramNotifier {
     /**
      * Gửi notification Telegram bất đồng bộ (fire-and-forget).
      *
-     * <p>Trả về ngay lập tức, gửi HTTP request trên virtual thread riêng.
+     * <p>Trả về ngay lập tức, gửi HTTP request trên executor thread riêng.
      * Không ảnh hưởng đến luồng xử lý SMS hay Redis publish.</p>
      *
      * @param msg SMS OTP đã được parse thành công.
@@ -76,18 +92,32 @@ public class TelegramNotifier {
         // Capture reference to avoid capturing `this` heavily in lambda
         String url  = TELEGRAM_API_BASE + botToken + "/sendMessage";
         String text = buildMessageText(msg);
+        int smsIndex = msg.getIndex();
 
-        // Dùng platform thread thông thường, tương thích Java 11+
-        Thread t = new Thread(() -> {
+        notifyExecutor.submit(() -> {
             try {
-                sendMessage(url, chatId, text, msg.getIndex());
+                sendMessage(url, chatId, text, smsIndex);
             } catch (Exception e) {
                 log.warn("Telegram notification failed for SMS index={}: {}",
-                        msg.getIndex(), e.getMessage(), e);
+                        smsIndex, e.getMessage(), e);
             }
-        }, "telegram-notify-" + msg.getIndex());
-        t.setDaemon(true);
-        t.start();
+        });
+    }
+
+    /**
+     * Shutdown executor. Gọi khi application shutdown.
+     */
+    public void shutdown() {
+        notifyExecutor.shutdown();
+        try {
+            if (!notifyExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                notifyExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            notifyExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        log.info("Telegram notifier shutdown complete.");
     }
 
     /**
@@ -95,7 +125,7 @@ public class TelegramNotifier {
      *
      * @param url    Telegram sendMessage endpoint (đã gắn bot token).
      * @param chatId Chat ID đích.
-     * @param text   Nội dung message (MarkdownV2).
+     * @param text   Nội dung message (HTML).
      */
     private void sendMessage(String url, String chatId, String text, int smsIndex) throws Exception {
         Map<String, String> payload = Map.of(

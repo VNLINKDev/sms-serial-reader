@@ -2,7 +2,6 @@ package com.example.sms.health;
 
 import com.example.sms.config.AppConfig;
 import com.example.sms.serial.SerialPortManager;
-import com.example.sms.serial.SerialReaderService;
 import com.example.sms.redis.RedisPublisher;
 import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.HttpHandler;
@@ -20,15 +19,13 @@ import java.nio.charset.StandardCharsets;
  */
 public class HealthCheckServer {
     private final SerialPortManager portManager;
-    private final SerialReaderService readerService;
     private final RedisPublisher redisPublisher;
     private final AppConfig config;
     private HttpServer server;
 
-    public HealthCheckServer(SerialPortManager portManager, SerialReaderService readerService,
+    public HealthCheckServer(SerialPortManager portManager,
             RedisPublisher redisPublisher, AppConfig config) {
         this.portManager = portManager;
-        this.readerService = readerService;
         this.redisPublisher = redisPublisher;
         this.config = config;
     }
@@ -56,7 +53,6 @@ public class HealthCheckServer {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             boolean open = portManager.isOpen();
-            boolean reconnecting = readerService.isReconnecting();
             boolean redisOk = false;
             try {
                 redisOk = "PONG".equalsIgnoreCase(redisPublisher.ping());
@@ -64,14 +60,14 @@ public class HealthCheckServer {
             }
 
             int statusCode = (open && redisOk) ? 200 : 503;
-            String statusStr = (open && redisOk) ? "UP" : (reconnecting ? "RECONNECTING" : "DOWN");
+            String statusStr = (open && redisOk) ? "UP" : "DOWN";
 
             // Xây dựng chuỗi JSON giống hệt định dạng Spring Boot Actuator
             String response = "{"
                     + "\"status\":\"" + statusStr + "\","
                     + "\"components\":{"
                     + "\"serial\":{"
-                    + "\"status\":\"" + (open ? "UP" : (reconnecting ? "RECONNECTING" : "DOWN")) + "\","
+                    + "\"status\":\"" + (open ? "UP" : "DOWN") + "\","
                     + "\"details\":{\"port\":\"" + config.getSerialPort() + "\"}"
                     + "},"
                     + "\"redis\":{"

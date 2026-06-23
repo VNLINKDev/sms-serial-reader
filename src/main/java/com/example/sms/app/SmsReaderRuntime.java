@@ -2,16 +2,13 @@ package com.example.sms.app;
 
 import com.example.sms.config.AppConfig;
 import com.example.sms.modem.ModemInitializer;
-import com.example.sms.modem.SmsIndexDetector;
 import com.example.sms.redis.RedisPublisher;
 import com.example.sms.serial.SerialPortManager;
-import com.example.sms.serial.SerialReaderService;
 import com.example.sms.smsreader.SmsMessage;
 import com.example.sms.smsreader.SmsService;
 import com.example.sms.telegram.TelegramNotifier;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -29,16 +26,15 @@ import org.slf4j.LoggerFactory;
  *
  * Chức năng chính:
  * - Khởi tạo modem
- * - Theo dõi SMS mới liên tục
- * - Đọc và parse SMS
+ * - Scan toàn bộ SMS trên SIM định kỳ (AT+CMGL="ALL")
+ * - Đọc và parse SMS mới nhất
  * - Publish message sang Redis
- * - Scan toàn bộ SMS trên SIM định kỳ, lấy tin nhắn mới nhất để tránh miss
- * message
+ * - Gửi Telegram notification
  *
  * Thiết kế concurrency:
- * - 1 thread polling liên tục detect SMS mới qua CMTI
- * - 1 single-thread executor để serialize AT command
- * - 1 scheduler scan định kỳ (AT+CMGL="ALL", lấy index mới nhất)
+ * - 1 single-thread executor để serialize AT command (commandExecutor)
+ * - 1 scheduler scan định kỳ
+ * - AtomicBoolean chống overlap scan
  */
 @RequiredArgsConstructor
 public class SmsReaderRuntime {
@@ -46,9 +42,7 @@ public class SmsReaderRuntime {
     private static final Logger log = LoggerFactory.getLogger(SmsReaderRuntime.class);
 
     private final SerialPortManager portManager;
-    private final SerialReaderService readerService;
     private final ModemInitializer modemInitializer;
-    private final SmsIndexDetector indexDetector;
     private final SmsService smsService;
     private final RedisPublisher redisPublisher;
     private final TelegramNotifier telegramNotifier;
@@ -75,11 +69,6 @@ public class SmsReaderRuntime {
     private volatile boolean running = false;
 
     /**
-     * Thread polling chính dùng để detect SMS mới.
-     */
-    private Thread pollThread;
-
-    /**
      * Task scan SMS định kỳ (lấy tin nhắn mới nhất từ toàn bộ SMS trên SIM).
      */
     private ScheduledFuture<?> latestSmsPollFuture;
@@ -99,19 +88,14 @@ public class SmsReaderRuntime {
      * Entry point khi application start.
      *
      * Flow startup:
-     * 1. Start serial reader
-     * 2. Initialize modem
-     * 3. Start polling SMS mới (CMTI event)
-     * 4. Start scheduler scan định kỳ (lấy tin nhắn mới nhất từ ALL SMS)
+     * 1. Initialize modem
+     * 2. Start scheduler scan định kỳ (lấy tin nhắn mới nhất từ ALL SMS)
      */
     public void run() throws Exception {
 
         log.info("Available serial ports: {}", SerialPortManager.listAvailablePorts());
 
         running = true;
-
-        // Start reader đọc raw data từ serial port
-        readerService.start();
 
         /**
          * Initialize modem đồng bộ.
@@ -121,111 +105,21 @@ public class SmsReaderRuntime {
         commandExecutor.submit(modemInitializer::initialize)
                 .get(30, TimeUnit.SECONDS);
 
-        // Start polling thread detect SMS mới
-        pollThread = new Thread(this::pollLoop, "sms-poll-thread");
-        pollThread.setDaemon(true);
-        pollThread.start();
-
         /**
          * Scheduler scan SMS định kỳ.
          *
-         * Đây là cơ chế fallback:
-         * - Đọc toàn bộ SMS trên SIM (AT+CMGL="ALL")
-         * - Lấy index mới nhất (số lớn nhất) để process
-         * - Tránh miss SMS do mất CMTI event hoặc process restart
+         * Đọc toàn bộ SMS trên SIM (AT+CMGL="ALL")
+         * Lấy tin nhắn mới nhất (theo timestamp) để process
+         * Tránh miss SMS do mất event hoặc process restart
          */
         latestSmsPollFuture = scheduler.scheduleAtFixedRate(
                 this::scheduleLatestSmsPoll,
-                appConfig.getUnreadPollIntervalMs(),
+                1000L,
                 appConfig.getUnreadPollIntervalMs(),
                 TimeUnit.MILLISECONDS);
 
-        log.info("SMS reader runtime started.");
-    }
-
-    /**
-     * Polling loop chính.
-     *
-     * Liên tục detect index SMS mới từ modem.
-     */
-    private void pollLoop() {
-
-        log.info("Entering main poll loop.");
-
-        while (running) {
-
-            /**
-             * Detect các SMS index mới.
-             *
-             * Ví dụ modem trả:
-             * +CMTI: "SM",12
-             *
-             * => detect ra index = 12
-             */
-            List<Integer> newIndexes = indexDetector.detect();
-
-            for (int index : newIndexes) {
-
-                /**
-                 * Submit vào single-thread executor
-                 * để đảm bảo modem command chạy tuần tự.
-                 */
-                commandExecutor.submit(() -> processIncomingSms(index));
-            }
-
-            try {
-
-                Thread.sleep(appConfig.getPollIntervalMs());
-
-            } catch (InterruptedException e) {
-
-                /**
-                 * Preserve interrupt flag
-                 * và shutdown loop gracefully.
-                 */
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-
-        log.debug("Poll loop exiting.");
-    }
-
-    /**
-     * Xử lý SMS mới nhận được.
-     *
-     * Flow:
-     * 1. Read SMS từ modem
-     * 2. Parse SMS
-     * 3. Publish Redis
-     */
-    private void processIncomingSms(int index) {
-
-        Optional<SmsMessage> msgOpt = smsService.readAndParse(index);
-
-        msgOpt.ifPresent(msg -> {
-
-            // Gửi Telegram notification ngay lập tức, độc lập với Redis.
-            // Kể cả khi Redis fail, Telegram vẫn được gửi.
-            telegramNotifier.notifyAsync(msg);
-
-            try {
-
-                // Publish realtime sang Redis
-                redisPublisher.publish(msg);
-
-            } catch (Exception e) {
-
-                /**
-                 * Không để lỗi Redis làm crash runtime.
-                 */
-                log.error(
-                        "Redis publish failed for SMS index={}: {}",
-                        index,
-                        e.getMessage(),
-                        e);
-            }
-        });
+        log.info("SMS reader runtime started (scheduled scan every {}ms).",
+                appConfig.getUnreadPollIntervalMs());
     }
 
     /**
@@ -286,7 +180,14 @@ public class SmsReaderRuntime {
 
         try {
 
-            List<com.example.sms.smsreader.SmsMessage> allMessages = smsService.readAndParseAll();
+            List<SmsMessage> allMessages;
+            try {
+                allMessages = smsService.readAndParseAll();
+            } catch (Exception e) {
+                log.error("Scheduled SMS scan failed to read/parse all SMS: {}",
+                        e.getMessage(), e);
+                return;
+            }
 
             if (allMessages.isEmpty()) {
 
@@ -296,7 +197,7 @@ public class SmsReaderRuntime {
 
                 // Danh sách đã sắp xếp timestamp tăng dần;
                 // chỉ cần publish tin mới nhất (cuối list) qua conditional check.
-                com.example.sms.smsreader.SmsMessage latestMsg = allMessages.get(allMessages.size() - 1);
+                SmsMessage latestMsg = allMessages.get(allMessages.size() - 1);
                 log.info("Scheduled SMS scan: {} OTP SMS found, latest is index={} timestamp={}.",
                         allMessages.size(), latestMsg.getIndex(), latestMsg.getTimestamp());
 
@@ -310,17 +211,10 @@ public class SmsReaderRuntime {
                      * - Tránh republish SMS cũ
                      */
                     boolean published = redisPublisher.publishIfNewerThanCurrent(latestMsg);
+
                     // Gửi Telegram notify nếu SMS thực sự được publish (mới hơn state hiện tại)
                     if (published) {
                         telegramNotifier.notifyAsync(latestMsg);
-
-                        for (Thread t : Thread.getAllStackTraces().keySet()) {
-                            if (t.getName().equals("telegram-notify-" + latestMsg.getIndex())) {
-                                System.out.println("Đang đợi thread gửi Telegram...");
-                                t.join(); // Luồng chính sẽ block ở đây cho đến khi gửi xong
-                                break;
-                            }
-                        }
                     }
 
                 } catch (Exception e) {
@@ -334,7 +228,7 @@ public class SmsReaderRuntime {
 
                 // Xóa các SMS đã được xử lý nếu cấu hình bật DELETE_SMS_AFTER_READ
                 if (appConfig.isDeleteSmsAfterRead()) {
-                    for (com.example.sms.smsreader.SmsMessage msg : allMessages) {
+                    for (SmsMessage msg : allMessages) {
                         smsService.deleteSms(msg.getIndex());
                     }
                 }
@@ -342,7 +236,11 @@ public class SmsReaderRuntime {
 
             // Cleanup SIM nếu vượt ngưỡng watermark — dùng list đã đọc sẵn,
             // không cần đọc lại SIM lần thứ hai.
-            smsService.cleanupOldSms(allMessages);
+            try {
+                smsService.cleanupOldSms(allMessages);
+            } catch (Exception e) {
+                log.warn("SIM cleanup failed: {}", e.getMessage());
+            }
 
         } catch (Exception e) {
 
@@ -364,11 +262,10 @@ public class SmsReaderRuntime {
      * Shutdown application một cách an toàn (graceful shutdown).
      *
      * Thứ tự shutdown:
-     * 1. Dừng polling loop
-     * 2. Huỷ scheduler scan unread SMS
+     * 1. Dừng flag running
+     * 2. Huỷ scheduler scan SMS
      * 3. Shutdown command executor
-     * 4. Stop serial reader service
-     * 5. Đóng serial port và giải phóng resource
+     * 4. Đóng serial port và giải phóng resource
      */
     public void shutdown() {
 
@@ -382,11 +279,6 @@ public class SmsReaderRuntime {
         log.info("Graceful shutdown requested...");
 
         running = false;
-
-        // Interrupt polling thread
-        if (pollThread != null) {
-            pollThread.interrupt();
-        }
 
         // Cancel scheduler task
         if (latestSmsPollFuture != null) {
@@ -417,7 +309,6 @@ public class SmsReaderRuntime {
         }
 
         // Release serial resources
-        readerService.stop();
         portManager.close();
 
         log.info("Shutdown complete.");

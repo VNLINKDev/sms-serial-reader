@@ -42,7 +42,6 @@ public class RedisPublisher implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(RedisPublisher.class);
 
     private static final long INITIAL_BACKOFF_MS = 200;
-    private static final int CONDITIONAL_SET_RETRIES = 3;
 
     private final AppConfig config;
     private final ObjectMapper mapper = buildMapper();
@@ -67,7 +66,7 @@ public class RedisPublisher implements AutoCloseable {
                 .withHost(config.getRedisHost())
                 .withPort(config.getRedisPort())
                 .withDatabase(config.getRedisDatabase())
-                .withTimeout(Duration.ofSeconds(10));
+                .withTimeout(Duration.ofMillis(config.getRedisTimeoutMs()));
 
         if (config.getRedisPassword() != null && !config.getRedisPassword().isBlank()) {
             uriBuilder.withPassword(config.getRedisPassword().toCharArray());
@@ -167,59 +166,41 @@ public class RedisPublisher implements AutoCloseable {
         String latestKey = config.getRedisLatestKey();
         String json = toJson(candidate);
         boolean isListMode = (config.getRedisMode() == AppConfig.RedisMode.LIST);
-        Exception lastException = null;
 
-        for (int attempt = 1; attempt <= CONDITIONAL_SET_RETRIES; attempt++) {
-            try {
-                // WATCH latestKey: transaction bị discard nếu flow realtime thay đổi key này.
-                commands.watch(latestKey);
-
-                // Đọc từ latestKey (luôn là value) thay vì scan vào queue chính.
-                String currentJson = commands.get(latestKey);
-                Optional<StoredSms> current = parseStoredSms(currentJson);
-                if (current.isPresent() && !isNewer(candidate, current.get())) {
-                    commands.unwatch();
-                    log.info("Skipped scheduled SMS index={} because latest-key '{}' already has newer/equal SMS index={}.",
-                            candidate.getIndex(), latestKey, current.get().index());
-                    return false;
-                }
-
-                commands.multi();
-                // Ghi vào queue chính.
-                if (isListMode) {
-                    commands.rpush(target, json);
-                } else {
-                    commands.set(target, json);
-                }
-                // Đồng thời cập nhật latestKey để check lần sau chính xác.
-                commands.set(latestKey, json);
-                TransactionResult result = commands.exec();
-                if (!result.wasDiscarded()) {
-                    if (isListMode) {
-                        log.info("Pushed scheduled SMS index={} to list '{}' and updated latest-key '{}'.",
-                                candidate.getIndex(), target, latestKey);
-                    } else {
-                        log.info("Set scheduled SMS index={} to key '{}' and updated latest-key '{}'.",
-                                candidate.getIndex(), target, latestKey);
-                    }
-                    return true;
-                }
-
-                log.info("Retrying scheduled SMS index={} because latest-key '{}' changed during compare.",
-                        candidate.getIndex(), latestKey);
-
-            } catch (Exception e) {
-                lastException = e;
-                log.warn("Conditional Redis save failed for scheduled SMS index={} (attempt {}/{}): {}",
-                        candidate.getIndex(), attempt, CONDITIONAL_SET_RETRIES, e.getMessage());
-                safeUnwatch();
+        try {
+            // Đọc từ latestKey (luôn là value) thay vì scan vào queue chính.
+            String currentJson = commands.get(latestKey);
+            Optional<StoredSms> current = parseStoredSms(currentJson);
+            if (current.isPresent() && !isNewer(candidate, current.get())) {
+                log.info("Skipped scheduled SMS index={} because latest-key '{}' already has newer/equal SMS index={}.",
+                        candidate.getIndex(), latestKey, current.get().index());
+                return false;
             }
-        }
 
-        throw new RedisPublishException(
-                "Failed conditional publish for scheduled SMS index=" + candidate.getIndex()
-                        + " after " + CONDITIONAL_SET_RETRIES + " attempts.",
-                lastException);
+            // Ghi vào queue chính.
+            if (isListMode) {
+                commands.rpush(target, json);
+            } else {
+                commands.set(target, json);
+            }
+            // Đồng thời cập nhật latestKey để check lần sau chính xác.
+            commands.set(latestKey, json);
+
+            if (isListMode) {
+                log.info("Pushed scheduled SMS index={} to list '{}' and updated latest-key '{}'.",
+                        candidate.getIndex(), target, latestKey);
+            } else {
+                log.info("Set scheduled SMS index={} to key '{}' and updated latest-key '{}'.",
+                        candidate.getIndex(), target, latestKey);
+            }
+            return true;
+
+        } catch (Exception e) {
+            log.error("Conditional Redis save failed for scheduled SMS index={}: {}",
+                    candidate.getIndex(), e.getMessage(), e);
+            throw new RedisPublishException(
+                    "Failed conditional publish for scheduled SMS index=" + candidate.getIndex(), e);
+        }
     }
 
     public String ping() {
@@ -287,14 +268,6 @@ public class RedisPublisher implements AutoCloseable {
         int timestampCompare = candidate.getTimestamp().toInstant().compareTo(current.timestamp().toInstant());
         return timestampCompare > 0
                 || (timestampCompare == 0 && candidate.getIndex() > current.index());
-    }
-
-    private void safeUnwatch() {
-        try {
-            commands.unwatch();
-        } catch (Exception ignored) {
-            // Cố gắng dọn dẹp trước lần thử tiếp theo.
-        }
     }
 
     private static ObjectMapper buildMapper() {
