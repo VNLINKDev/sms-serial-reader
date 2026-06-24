@@ -14,43 +14,17 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
-/**
- * Gửi background notification lên Telegram group khi nhận OTP SMS.
- *
- * <p>Sử dụng Telegram Bot API endpoint {@code sendMessage} qua HTTPS POST.
- * Gửi bất đồng bộ (fire-and-forget) trên single-thread executor để không block
- * luồng xử lý SMS chính và tránh thread leak. Lỗi gửi Telegram chỉ log warn,
- * không throw.</p>
- *
- * <p>Tính năng được bật/tắt qua env var {@code TELEGRAM_ENABLED}.</p>
- */
 public class TelegramNotifier {
 
     private static final Logger log = LoggerFactory.getLogger(TelegramNotifier.class);
 
     private static final String TELEGRAM_API_BASE = "https://api.telegram.org/bot";
-    private static final DateTimeFormatter DISPLAY_FMT =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter DISPLAY_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final AppConfig config;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
-
-    /**
-     * Single-thread executor xử lý tất cả Telegram notification tuần tự.
-     *
-     * Thay vì tạo thread mới cho mỗi SMS (gây thread leak khi chạy lâu),
-     * sử dụng executor cố định để đảm bảo resource không bị rò rỉ.
-     */
-    private final ExecutorService notifyExecutor = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "telegram-notifier");
-        t.setDaemon(true);
-        return t;
-    });
 
     public TelegramNotifier(AppConfig config) {
         this.config = config;
@@ -60,22 +34,15 @@ public class TelegramNotifier {
         this.objectMapper = new ObjectMapper();
     }
 
-    /**
-     * Gửi notification Telegram bất đồng bộ (fire-and-forget).
-     *
-     * <p>Trả về ngay lập tức, gửi HTTP request trên executor thread riêng.
-     * Không ảnh hưởng đến luồng xử lý SMS hay Redis publish.</p>
-     *
-     * @param msg SMS OTP đã được parse thành công.
-     */
-    public void notifyAsync(SmsMessage msg) {
+    public void sendSync(SmsMessage msg) throws Exception {
         if (!config.isTelegramEnabled()) {
-            log.warn("Telegram is DISABLED (TELEGRAM_ENABLED=false), skipping notify for SMS index={}.", msg.getIndex());
+            log.warn("Telegram is DISABLED (TELEGRAM_ENABLED=false), skipping notify for SMS index={}.",
+                    msg.getIndex());
             return;
         }
 
         String botToken = config.getTelegramBotToken();
-        String chatId   = config.getTelegramChatId();
+        String chatId = config.getTelegramChatId();
 
         if (botToken == null || botToken.isBlank()) {
             log.warn("Telegram notification skipped: TELEGRAM_BOT_TOKEN is not configured.");
@@ -86,53 +53,29 @@ public class TelegramNotifier {
             return;
         }
 
-        log.info("Telegram notification queued for SMS index={} transactionId={}.",
+        String url = TELEGRAM_API_BASE + botToken + "/sendMessage";
+        String text = buildMessageText(msg);
+
+        log.debug("Sending Telegram notification for SMS index={} transactionId={}...",
                 msg.getIndex(), msg.getTransactionId());
 
-        // Capture reference to avoid capturing `this` heavily in lambda
-        String url  = TELEGRAM_API_BASE + botToken + "/sendMessage";
-        String text = buildMessageText(msg);
-        int smsIndex = msg.getIndex();
-
-        notifyExecutor.submit(() -> {
-            try {
-                sendMessage(url, chatId, text, smsIndex);
-            } catch (Exception e) {
-                log.warn("Telegram notification failed for SMS index={}: {}",
-                        smsIndex, e.getMessage(), e);
-            }
-        });
+        sendMessage(url, chatId, text, msg.getIndex());
     }
 
     /**
-     * Shutdown executor. Gọi khi application shutdown.
-     */
-    public void shutdown() {
-        notifyExecutor.shutdown();
-        try {
-            if (!notifyExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-                notifyExecutor.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            notifyExecutor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
-        log.info("Telegram notifier shutdown complete.");
-    }
-
-    /**
-     * Thực hiện HTTP POST đến Telegram API.
+     * Thực hiện HTTP POST đến Telegram Bot API.
      *
-     * @param url    Telegram sendMessage endpoint (đã gắn bot token).
-     * @param chatId Chat ID đích.
-     * @param text   Nội dung message (HTML).
+     * @param url      Telegram sendMessage endpoint (đã gắn bot token).
+     * @param chatId   Chat ID đích.
+     * @param text     Nội dung message (HTML).
+     * @param smsIndex Index của SMS, dùng cho log.
+     * @throws Exception nếu HTTP request thất bại hoặc response không phải 200.
      */
     private void sendMessage(String url, String chatId, String text, int smsIndex) throws Exception {
         Map<String, String> payload = Map.of(
-                "chat_id",    chatId,
-                "text",       text,
-                "parse_mode", "HTML"
-        );
+                "chat_id", chatId,
+                "text", text,
+                "parse_mode", "HTML");
 
         String body = objectMapper.writeValueAsString(payload);
 
@@ -143,14 +86,17 @@ public class TelegramNotifier {
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
 
-        log.debug("Sending Telegram HTTP request for SMS index={}...", smsIndex);
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() == 200) {
-            log.info("Telegram notification sent OK for SMS index={}.", smsIndex);
+            log.debug("Telegram HTTP 200 OK for SMS index={}.", smsIndex);
         } else {
-            log.warn("Telegram API returned HTTP {} for SMS index={}. Body: {}",
-                    response.statusCode(), smsIndex, response.body());
+            // Ném exception để caller biết gửi thất bại → lastTelegramTransactionId không
+            // cập nhật
+            throw new RuntimeException(
+                    "Telegram API returned HTTP " + response.statusCode()
+                            + " for SMS index=" + smsIndex
+                            + ". Body: " + response.body());
         }
     }
 
@@ -172,9 +118,10 @@ public class TelegramNotifier {
      * Escape các ký tự đặc biệt HTML để tránh lỗi parse message Telegram.
      */
     private static String escapeHtml(String text) {
-        if (text == null) return "";
+        if (text == null)
+            return "";
         return text.replace("&", "&amp;")
-                   .replace("<", "&lt;")
-                   .replace(">", "&gt;");
+                .replace("<", "&lt;")
+                .replace(">", "&gt;");
     }
 }

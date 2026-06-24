@@ -10,13 +10,14 @@ import com.example.sms.smsreader.SmsMessage;
 import com.example.sms.smsreader.SmsService;
 import com.example.sms.telegram.TelegramNotifier;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
 
 import lombok.RequiredArgsConstructor;
 
@@ -35,95 +36,68 @@ public class SmsReaderRuntime {
     private final TelegramNotifier telegramNotifier;
     private final AppConfig appConfig;
 
-    private final ExecutorService commandExecutor = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "sms-command-thread");
-        t.setDaemon(true);
-        return t;
-    });
+    private final AtomicReference<SmsMessage> pendingRedis = new AtomicReference<>();
+    private final AtomicReference<SmsMessage> pendingTelegram = new AtomicReference<>();
+    private final AtomicReference<List<SmsMessage>> pendingDelete = new AtomicReference<>();
 
-    private final ExecutorService redisExecutor = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "sms-redis-thread");
-        t.setDaemon(true);
-        return t;
-    });
+    private volatile Thread redisThread;
+    private volatile Thread telegramThread;
+    private volatile Thread deleteThread;
+
+    private volatile String lastRedisTransactionId = null;
+    private volatile String lastTelegramTransactionId = null;
+
+    private final ExecutorService scanExecutor = newDaemonSingle("sms-scan");
+    private final ExecutorService redisExecutor = newDaemonSingle("sms-redis");
+    private final ExecutorService telegramExecutor = newDaemonSingle("sms-telegram");
+    private final ExecutorService deleteExecutor = newDaemonSingle("sms-delete");
 
     private volatile boolean running = false;
-    private ScheduledFuture<?> pollFuture;
 
-    private final AtomicBoolean scanInProgress = new AtomicBoolean(false);
-
-    /**
-     * Tin nhắn mới nhất do thread đọc tìm thấy, đang chờ thread Redis lấy đi
-     * publish.
-     */
-    private volatile SmsMessage pendingMessage = null;
-
-    /** Lock dùng để báo hiệu (wait/notify) giữa thread đọc và thread publish. */
-    private final Object publishLock = new Object();
-
-    /** transactionId đã publish thành công gần nhất. */
-    private volatile String lastPublishedTransactionId = null;
-
-    /**
-     * transactionId đang được thread Redis xử lý (kể cả đang retry), để thread đọc
-     * tránh ghi đè trùng.
-     */
-    private volatile String currentlyPublishingTransactionId = null;
+    // ========================================================================
+    // LIFECYCLE
+    // ========================================================================
 
     public void run() throws Exception {
         log.info("Available serial ports: {}", SerialPortManager.listAvailablePorts());
-
         running = true;
 
-        commandExecutor.submit(modemInitializer::initialize)
+        scanExecutor.submit(modemInitializer::initialize)
                 .get(30, TimeUnit.SECONDS);
 
-        commandExecutor.submit(this::scanLoop);
-        redisExecutor.submit(this::publishLoop);
+        redisExecutor.submit(this::redisLoop);
+        telegramExecutor.submit(this::telegramLoop);
+        deleteExecutor.submit(this::deleteLoop);
 
-        log.info("SMS reader runtime started (poll delay={}ms after each scan completes).",
+        while (redisThread == null || telegramThread == null || deleteThread == null) {
+            Thread.onSpinWait();
+        }
+
+        scanExecutor.submit(this::scanLoop);
+
+        log.info("SMS reader runtime started (poll interval={}ms).",
                 appConfig.getUnreadPollIntervalMs());
     }
 
     public void shutdown() {
-        if (!running && commandExecutor.isShutdown() && redisExecutor.isShutdown()) {
+        if (!running)
             return;
-        }
-
         log.info("Graceful shutdown requested...");
         running = false;
 
-        if (pollFuture != null) {
-            pollFuture.cancel(false);
-        }
+        // Đánh thức tất cả consumer đang park() để chúng kiểm tra running=false và
+        // thoát
+        if (redisThread != null)
+            LockSupport.unpark(redisThread);
+        if (telegramThread != null)
+            LockSupport.unpark(telegramThread);
+        if (deleteThread != null)
+            LockSupport.unpark(deleteThread);
 
-        // Đánh thức thread publish nếu đang wait() để nó thấy running=false và thoát.
-        synchronized (publishLock) {
-            publishLock.notifyAll();
-        }
-
-        commandExecutor.shutdown();
-        redisExecutor.shutdown();
-
-        try {
-            if (!commandExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
-                log.warn("commandExecutor did not terminate in time, forcing shutdown.");
-                commandExecutor.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            commandExecutor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
-
-        try {
-            if (!redisExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
-                log.warn("redisExecutor did not terminate in time, forcing shutdown.");
-                redisExecutor.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            redisExecutor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
+        shutdownExecutor(scanExecutor, "sms-scan");
+        shutdownExecutor(redisExecutor, "sms-redis");
+        shutdownExecutor(telegramExecutor, "sms-telegram");
+        shutdownExecutor(deleteExecutor, "sms-delete");
 
         portManager.close();
         log.info("Shutdown complete.");
@@ -134,94 +108,224 @@ public class SmsReaderRuntime {
 
         while (running) {
             try {
-                doScanAndPublish();
+                doScan();
             } catch (Exception e) {
-                // doScanAndPublish tự xử lý exception bên trong,
-                // catch ở đây chỉ để loop không bị dừng do lỗi bất ngờ
                 log.error("Unexpected error in scan loop: {}", e.getMessage(), e);
             }
 
-            // Nghỉ đúng interval SAU KHI scan xong
-            // InterruptedException từ shutdownNow() → thoát loop ngay lập tức
             try {
                 Thread.sleep(appConfig.getUnreadPollIntervalMs());
             } catch (InterruptedException e) {
-                log.info("Scan loop interrupted, shutting down.");
                 Thread.currentThread().interrupt();
                 break;
             }
         }
+
         log.info("Scan loop stopped.");
     }
 
-    private void doScanAndPublish() {
+    private void doScan() {
+        List<SmsMessage> allMessages;
         try {
-            List<SmsMessage> allMessages;
+            allMessages = smsService.readAndParseAll();
+        } catch (SerialPortException | ModemTimeoutException e) {
+            log.error("Modem communication error: {}. Attempting to reconnect...", e.getMessage());
+            handleModemReconnect();
+            return;
+        } catch (Exception e) {
+            log.error("Failed to read/parse SMS: {}", e.getMessage(), e);
+            return;
+        }
+
+        if (allMessages.isEmpty()) {
+            log.debug("No OTP SMS found on SIM.");
+            return;
+        }
+
+        SmsMessage latest = allMessages.get(allMessages.size() - 1);
+        String latestId = latest.getTransactionId();
+
+        log.info("Scan found {} OTP SMS, latest: index={} transactionId={} timestamp={}.",
+                allMessages.size(), latest.getIndex(), latestId, latest.getTimestamp());
+
+        // Kiểm tra từng consumer độc lập — một consumer đã xử lý không ảnh hưởng
+        // consumer kia
+        boolean needRedis = !Objects.equals(latestId, lastRedisTransactionId);
+        boolean needTelegram = !Objects.equals(latestId, lastTelegramTransactionId);
+
+        if (needRedis) {
+            // set() ghi đè nếu consumer chưa kịp lấy — "latest-wins"
+            pendingRedis.set(latest);
+            LockSupport.unpark(redisThread);
+        } else {
+            log.debug("Redis already handled transactionId={}. Skipping.", latestId);
+        }
+
+        if (needTelegram) {
+            pendingTelegram.set(latest);
+            LockSupport.unpark(telegramThread);
+        } else {
+            log.debug("Telegram already handled transactionId={}. Skipping.", latestId);
+        }
+
+        // Delete luôn nhận full list, không cần track last
+        if (appConfig.isDeleteSmsAfterRead()) {
+            pendingDelete.set(new ArrayList<>(allMessages));
+            LockSupport.unpark(deleteThread);
+        }
+    }
+
+    private void redisLoop() {
+        redisThread = Thread.currentThread();
+        log.info("Redis loop started.");
+
+        while (running) {
+            LockSupport.park(this);
+
+            SmsMessage msg = pendingRedis.getAndSet(null);
+            if (msg == null)
+                continue;
+
+            publishWithRetry(msg);
+        }
+
+        SmsMessage msg = pendingRedis.getAndSet(null);
+        if (msg != null)
+            publishWithRetry(msg);
+
+        log.info("Redis loop stopped.");
+    }
+
+    private void publishWithRetry(SmsMessage msg) {
+        int maxRetries = 3;
+        long backoffMs = 1000L;
+
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            if (!running && attempt > 1) {
+                log.info("Publish aborted — runtime is shutting down.");
+                return;
+            }
+
             try {
-                allMessages = smsService.readAndParseAll();
-            } catch (SerialPortException | ModemTimeoutException e) {
-                log.error("Modem communication error during scan: {}. Attempting to reconnect...", e.getMessage());
-                handleModemReconnect();
+                redisPublisher.publish(msg);
+
+                // Chỉ update last của redis — không ảnh hưởng telegram
+                lastRedisTransactionId = msg.getTransactionId();
+                log.info("Published to Redis transactionId={} index={} (attempt {}/{}).",
+                        msg.getTransactionId(), msg.getIndex(), attempt, maxRetries);
                 return;
+
             } catch (Exception e) {
-                log.error("Failed to read/parse SMS from SIM: {}", e.getMessage(), e);
-                return;
-            }
+                log.warn("Redis publish attempt {}/{} failed for transactionId={}: {}",
+                        attempt, maxRetries, msg.getTransactionId(), e.getMessage());
 
-            if (allMessages.isEmpty()) {
-                log.debug("No OTP SMS found on SIM.");
-                return;
-            }
-
-            SmsMessage latest = allMessages.get(allMessages.size() - 1);
-            log.info("Scan found {} OTP SMS, latest: index={} transactionId={} timestamp={}.",
-                    allMessages.size(), latest.getIndex(), latest.getTransactionId(), latest.getTimestamp());
-
-            String latestId = latest.getTransactionId();
-            if (Objects.equals(latestId, lastPublishedTransactionId)) {
-                log.debug("SMS transactionId={} already published. Skipping.", latestId);
-            } else if (Objects.equals(latestId, currentlyPublishingTransactionId)) {
-                log.debug("SMS transactionId={} is currently being published/retried. Skipping.", latestId);
-            } else {
-                telegramNotifier.notifyAsync(latest);
-                offerForPublish(latest);
-            }
-
-            if (appConfig.isDeleteSmsAfterRead()) {
-                for (SmsMessage msg : allMessages) {
-                    smsService.deleteSms(msg.getIndex());
+                if (attempt < maxRetries && running) {
+                    try {
+                        Thread.sleep(backoffMs);
+                        backoffMs *= 2; // 1s → 2s
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
                 }
             }
+        }
 
-            try {
-                smsService.cleanupOldSms(allMessages);
-            } catch (Exception e) {
-                log.warn("SIM cleanup failed: {}", e.getMessage());
-            }
+        // Tất cả retry fail — lastRedisTransactionId KHÔNG được update
+        // → scan tiếp theo sẽ thấy needRedis=true và retry tự nhiên
+        log.error("Failed to publish to Redis transactionId={} index={} after {} attempts. Will retry on next scan.",
+                msg.getTransactionId(), msg.getIndex(), maxRetries);
+    }
+
+    // ========================================================================
+    // TELEGRAM LOOP
+    // ========================================================================
+
+    private void telegramLoop() {
+        telegramThread = Thread.currentThread();
+        log.info("Telegram loop started.");
+
+        while (running) {
+            LockSupport.park(this);
+
+            SmsMessage msg = pendingTelegram.getAndSet(null);
+            if (msg == null)
+                continue; // spurious wakeup
+
+            sendTelegram(msg);
+        }
+
+        // Drain
+        SmsMessage msg = pendingTelegram.getAndSet(null);
+        if (msg != null)
+            sendTelegram(msg);
+
+        log.info("Telegram loop stopped.");
+    }
+
+    private void sendTelegram(SmsMessage msg) {
+        try {
+            telegramNotifier.sendSync(msg);
+
+            lastTelegramTransactionId = msg.getTransactionId();
+            log.info("Telegram notification sent for transactionId={} index={}.",
+                    msg.getTransactionId(), msg.getIndex());
 
         } catch (Exception e) {
-            log.error("Unexpected error during SMS scan: {}", e.getMessage(), e);
-        } finally {
-            scanInProgress.set(false);
+            // lastTelegramTransactionId KHÔNG được update
+            // → scan tiếp theo sẽ thấy needTelegram=true và retry tự nhiên
+            log.warn("Telegram notification failed for transactionId={} index={}: {}",
+                    msg.getTransactionId(), msg.getIndex(), e.getMessage());
         }
     }
 
-    /**
-     * Đưa tin nhắn vào biến chờ (pendingMessage) và báo hiệu cho thread Redis.
-     * Nếu thread Redis chưa kịp lấy tin trước đó (hiếm khi xảy ra), tin cũ trong
-     * biến sẽ bị ghi đè bởi tin mới nhất — vì ta luôn chỉ quan tâm tin mới nhất.
-     */
-    private void offerForPublish(SmsMessage msg) {
-        synchronized (publishLock) {
-            pendingMessage = msg;
-            publishLock.notifyAll();
+    // ========================================================================
+    // DELETE LOOP
+    // ========================================================================
+
+    private void deleteLoop() {
+        deleteThread = Thread.currentThread();
+        log.info("Delete loop started.");
+
+        while (running) {
+            LockSupport.park(this);
+
+            List<SmsMessage> batch = pendingDelete.getAndSet(null);
+            if (batch == null)
+                continue; // spurious wakeup
+
+            deleteBatch(batch);
+        }
+
+        // Drain
+        List<SmsMessage> batch = pendingDelete.getAndSet(null);
+        if (batch != null)
+            deleteBatch(batch);
+
+        log.info("Delete loop stopped.");
+    }
+
+    private void deleteBatch(List<SmsMessage> batch) {
+        for (SmsMessage msg : batch) {
+            try {
+                smsService.deleteSms(msg.getIndex());
+                log.debug("Deleted SMS index={}.", msg.getIndex());
+            } catch (Exception e) {
+                log.warn("Failed to delete SMS index={}: {}", msg.getIndex(), e.getMessage());
+            }
+        }
+
+        try {
+            smsService.cleanupOldSms(batch);
+        } catch (Exception e) {
+            log.warn("SIM cleanup failed: {}", e.getMessage());
         }
     }
 
-    /**
-     * Thực hiện kết nối lại cổng serial và khởi tạo lại modem khi gặp sự cố phần
-     * cứng.
-     */
+    // ========================================================================
+    // HELPERS
+    // ========================================================================
+
     private void handleModemReconnect() {
         try {
             portManager.reconnect();
@@ -232,95 +336,24 @@ public class SmsReaderRuntime {
         }
     }
 
-    /**
-     * Loop chạy trên redisExecutor thread: chờ (wait) tin mới trong pendingMessage,
-     * lấy ra rồi publish. Không busy-loop — chỉ thức khi có notify từ scan thread
-     * hoặc khi shutdown() gọi notifyAll().
-     */
-    private void publishLoop() {
-        log.info("Redis publish loop started.");
-
-        while (true) {
-            SmsMessage msgToPublish;
-
-            synchronized (publishLock) {
-                while (pendingMessage == null && running) {
-                    try {
-                        publishLock.wait();
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        log.info("Redis publish loop interrupted, shutting down.");
-                        return;
-                    }
-                }
-
-                if (pendingMessage == null) {
-                    // running == false và không còn gì để publish → thoát.
-                    break;
-                }
-
-                msgToPublish = pendingMessage;
-                pendingMessage = null;
+    private void shutdownExecutor(ExecutorService ex, String name) {
+        ex.shutdown();
+        try {
+            if (!ex.awaitTermination(10, TimeUnit.SECONDS)) {
+                log.warn("{} did not terminate in time, forcing shutdown.", name);
+                ex.shutdownNow();
             }
-
-            publishWithRetry(msgToPublish);
+        } catch (InterruptedException e) {
+            ex.shutdownNow();
+            Thread.currentThread().interrupt();
         }
-
-        log.info("Redis publish loop stopped.");
     }
 
-    /**
-     * Publish SMS lên Redis với exponential backoff retry.
-     * Chạy trên redisExecutor thread (KHÔNG còn ảnh hưởng tới việc poll modem).
-     *
-     * Retry tối đa 3 lần: backoff 1s → 2s → dừng.
-     * Nếu tất cả lần thử fail → log error, KHÔNG update lastPublishedTransactionId
-     * → scan tiếp theo sẽ tự động thử lại (vì transactionId vẫn khác
-     * lastPublishedTransactionId
-     * và currentlyPublishingTransactionId sẽ được clear ở finally).
-     */
-    private void publishWithRetry(SmsMessage msg) {
-        currentlyPublishingTransactionId = msg.getTransactionId();
-        try {
-            int maxRetries = 3;
-            long backoffMs = 1000L;
-
-            for (int attempt = 1; attempt <= maxRetries; attempt++) {
-                if (!running) {
-                    log.info("Publish aborted — runtime is shutting down.");
-                    return;
-                }
-
-                try {
-                    redisPublisher.publish(msg);
-
-                    lastPublishedTransactionId = msg.getTransactionId();
-                    log.info("Published SMS transactionId={} index={} (attempt {}/{}).",
-                            msg.getTransactionId(), msg.getIndex(), attempt, maxRetries);
-
-                    return;
-
-                } catch (Exception e) {
-                    log.warn("Publish attempt {}/{} failed for transactionId={}: {}",
-                            attempt, maxRetries, msg.getTransactionId(), e.getMessage());
-
-                    if (attempt < maxRetries && running) {
-                        try {
-                            Thread.sleep(backoffMs);
-                            backoffMs *= 2; // 1s → 2s
-                        } catch (InterruptedException ie) {
-                            Thread.currentThread().interrupt();
-                            return;
-                        }
-                    }
-                }
-            }
-
-            // Tất cả retry fail — log error, để scan tiếp theo retry tự nhiên
-            log.error("Failed to publish SMS transactionId={} index={} after {} attempts. Will retry on next scan.",
-                    msg.getTransactionId(), msg.getIndex(), maxRetries);
-        } finally {
-            currentlyPublishingTransactionId = null;
-        }
+    private static ExecutorService newDaemonSingle(String name) {
+        return Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, name);
+            t.setDaemon(true);
+            return t;
+        });
     }
 }

@@ -10,15 +10,11 @@ import com.example.sms.redis.RedisPublisher;
 import com.example.sms.telegram.TelegramNotifier;
 import com.example.sms.app.SmsReaderRuntime;
 
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-
 /**
  * Entry Point (Bootstrap Class) của ứng dụng Java SE thuần.
  *
  * Chịu trách nhiệm khởi tạo cấu hình, kết nối Serial Port, Redis,
- * HTTP check health server, Scheduler quét tin nhắn và điều phối chính
- * (Runtime).
+ * và điều phối Core Runtime.
  */
 public class SmsReaderApplication {
 
@@ -57,21 +53,12 @@ public class SmsReaderApplication {
             System.exit(1);
         }
 
-        // 6. Khởi tạo Scheduler (Thay thế cho TaskScheduler của Spring)
-        // Sử dụng ThreadFactory thông thường, tương thích Java 11+
-        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(
-                2,
-                r -> {
-                    Thread t = new Thread(r);
-                    t.setName("sms-scan-scheduler-" + t.getId());
-                    t.setDaemon(true);
-                    return t;
-                });
-
-        // 8. Khởi tạo Telegram Notifier (gửi notification khi nhận OTP)
+        // 6. Khởi tạo Telegram Notifier
+        // TelegramNotifier không còn quản lý executor nội bộ —
+        // thread được điều phối hoàn toàn bởi SmsReaderRuntime.
         TelegramNotifier telegramNotifier = new TelegramNotifier(config);
 
-        // 9. Khởi chạy Core Runtime (chỉ dùng scheduled scan định kỳ)
+        // 7. Khởi chạy Core Runtime
         SmsReaderRuntime runtime = new SmsReaderRuntime(
                 portManager, modemInitializer,
                 smsService, redisPublisher, telegramNotifier, config);
@@ -80,14 +67,12 @@ public class SmsReaderApplication {
             runtime.run();
         } catch (Exception e) {
             System.err.println("CRITICAL: SMS Reader Runtime run failed: " + e.getMessage());
-            telegramNotifier.shutdown();
             redisPublisher.close();
             portManager.close();
-            scheduler.shutdown();
             System.exit(1);
         }
 
-        // 10. Đăng ký JVM Shutdown Hook để tắt ứng dụng an toàn (Graceful Shutdown)
+        // 8. Đăng ký JVM Shutdown Hook để tắt ứng dụng an toàn (Graceful Shutdown)
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("==================================================");
             System.out.println("JVM Shutdown Hook triggered. Shutting down gracefully...");
@@ -100,21 +85,9 @@ public class SmsReaderApplication {
             }
 
             try {
-                telegramNotifier.shutdown();
-            } catch (Exception e) {
-                System.err.println("Error shutting down Telegram notifier: " + e.getMessage());
-            }
-
-            try {
                 redisPublisher.close();
             } catch (Exception e) {
                 System.err.println("Error closing Redis publisher: " + e.getMessage());
-            }
-
-            try {
-                scheduler.shutdown();
-            } catch (Exception e) {
-                System.err.println("Error shutting down scheduler: " + e.getMessage());
             }
 
             System.out.println("Shutdown complete. Bye!");
