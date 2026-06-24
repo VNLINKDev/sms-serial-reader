@@ -6,6 +6,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.example.sms.config.AppConfig;
 import com.example.sms.exception.NonOtpSmsException;
+import com.example.sms.exception.SerialPortException;
+import com.example.sms.exception.ModemTimeoutException;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -119,6 +121,8 @@ public class SmsService {
             } catch (com.example.sms.exception.NonOtpSmsException e) {
                 log.debug("Scheduled scan: SMS at index {} is not OTP — deleting from SIM: {}", index, e.getMessage());
                 deleteSms(index);
+            } catch (SerialPortException | ModemTimeoutException e) {
+                throw e;
             } catch (Exception e) {
                 log.warn("Scheduled scan: could not read/parse SMS at index {}: {}", index, e.getMessage());
             }

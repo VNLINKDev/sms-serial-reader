@@ -8,5 +8,4 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: staging
       DELETE_SMS_AFTER_READ: ${DELETE_SMS_AFTER_READ:-false}
-      MANAGEMENT_HEALTH_SHOW_DETAILS: when_authorized
       LOG_LEVEL: INFO

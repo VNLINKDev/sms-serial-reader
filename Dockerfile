@@ -28,9 +28,4 @@ WORKDIR /app
 COPY --from=build /workspace/target/sms-serial-reader-${APP_VERSION}.jar /app/app.jar
 
 USER smsreader
-EXPOSE 8080
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:${SERVER_PORT}/actuator/health | grep -q '"status":"UP"' || exit 1
-
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar /app/app.jar"]

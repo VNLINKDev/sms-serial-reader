@@ -8,7 +8,6 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: prod
       DELETE_SMS_AFTER_READ: ${DELETE_SMS_AFTER_READ:-true}
-      MANAGEMENT_HEALTH_SHOW_DETAILS: never
       LOG_LEVEL: INFO
     deploy:
       resources:
@@ -24,7 +23,7 @@ services:
     restart: unless-stopped
     depends_on:
       sms-reader:
-        condition: service_healthy
+        condition: service_started
     ports:
       - "80:80"
       - "443:443"

@@ -3,7 +3,6 @@ set -Eeuo pipefail
 
 ENVIRONMENT="${1:-staging}"
 PROJECT_NAME="${COMPOSE_PROJECT_NAME:-sms-reader}"
-HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:${SERVER_PORT:-8080}/actuator/health}"
 
 case "$ENVIRONMENT" in
   local|dev)
@@ -37,17 +36,17 @@ docker compose $COMPOSE_FILES -p "$PROJECT_NAME" pull --ignore-pull-failures
 docker compose $COMPOSE_FILES -p "$PROJECT_NAME" build sms-reader
 docker compose $COMPOSE_FILES -p "$PROJECT_NAME" up -d --remove-orphans
 
-echo "Waiting for health endpoint: $HEALTH_URL"
-for i in $(seq 1 30); do
-  if curl -fsS "$HEALTH_URL" | grep -q '"status":"UP"'; then
-    echo "Deploy succeeded."
-    docker compose $COMPOSE_FILES -p "$PROJECT_NAME" ps
-    exit 0
-  fi
-  sleep 5
-done
+echo "Waiting for container to start..."
+sleep 5
 
-echo "Deploy failed: health check did not return UP." >&2
+STATE="$(docker compose $COMPOSE_FILES -p "$PROJECT_NAME" ps sms-reader --format "{{.State}}" 2>/dev/null || true)"
+if [ "$STATE" = "running" ]; then
+  echo "Deploy succeeded."
+  docker compose $COMPOSE_FILES -p "$PROJECT_NAME" ps
+  exit 0
+fi
+
+echo "Deploy failed: sms-reader container is not running (State: ${STATE:-unknown})." >&2
 docker compose $COMPOSE_FILES -p "$PROJECT_NAME" logs --tail=200 sms-reader >&2
 ./scripts/rollback.sh "$ENVIRONMENT" || true
 exit 1

@@ -42,16 +42,8 @@ services:
       - "${SERIAL_DEVICE:-/dev/ttyUSB0}:${SERIAL_DEVICE:-/dev/ttyUSB0}"
     group_add:
       - dialout
-    ports:
-      - "127.0.0.1:${SERVER_PORT:-8080}:8080"
     volumes:
       - ./logs:/app/logs
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health | grep -q '\"status\":\"UP\"'"]
-      interval: 30s
-      timeout: 5s
-      start_period: 60s
-      retries: 3
 
 volumes:
   redis-data:

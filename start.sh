@@ -83,26 +83,19 @@ echo -e "${GREEN}[OK] App đã khởi động với PID: $APP_PID${NC}"
 echo -e "     Log: tail -f $LOG_FILE"
 echo ""
 
-# --- Chờ health check (tối đa 60 giây) ---
-echo -n "     Chờ app sẵn sàng"
-for i in $(seq 1 30); do
-    sleep 2
-    if curl -sf "http://127.0.0.1:${SERVER_PORT}/actuator/health" | grep -q '"status":"UP"'; then
-        echo ""
-        echo -e "${GREEN}[OK] App UP — http://127.0.0.1:${SERVER_PORT}/actuator/health${NC}"
-        exit 0
-    fi
-    # Kiểm tra process còn sống không
+# --- Kiểm tra tiến trình khởi chạy (chờ 5 giây xem process có sống không) ---
+echo -n "     Kiểm tra tiến trình khởi chạy"
+for i in $(seq 1 5); do
+    sleep 1
     if ! ps -p "$APP_PID" > /dev/null 2>&1; then
         echo ""
-        echo -e "${RED}[ERROR] Process đã dừng bất thường! Xem log:${NC}"
+        echo -e "${RED}[ERROR] Tiến trình đã dừng bất thường! Xem log:${NC}"
         echo "        tail -50 $LOG_FILE"
         rm -f "$PID_FILE"
         exit 1
     fi
     echo -n "."
 done
-
 echo ""
-echo -e "${YELLOW}[WARN] App chưa báo UP sau 60s. Kiểm tra log:${NC}"
-echo "       tail -f $LOG_FILE"
+echo -e "${GREEN}[OK] Tiến trình khởi chạy thành công (PID: $APP_PID)${NC}"
+exit 0

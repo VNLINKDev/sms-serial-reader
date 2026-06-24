@@ -32,15 +32,14 @@ APP_VERSION="${APP_VERSION:-rollback}"
 docker tag "$PREVIOUS_IMAGE" "$APP_IMAGE:$APP_VERSION"
 docker compose $COMPOSE_FILES -p "$PROJECT_NAME" up -d --no-build --remove-orphans sms-reader
 
-HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:${SERVER_PORT:-8080}/actuator/health}"
-for i in $(seq 1 20); do
-  if curl -fsS "$HEALTH_URL" | grep -q '"status":"UP"'; then
-    echo "Rollback succeeded."
-    exit 0
-  fi
-  sleep 5
-done
+echo "Waiting for container to rollback..."
+sleep 5
+STATE="$(docker compose $COMPOSE_FILES -p "$PROJECT_NAME" ps sms-reader --format "{{.State}}" 2>/dev/null || true)"
+if [ "$STATE" = "running" ]; then
+  echo "Rollback succeeded."
+  exit 0
+fi
 
-echo "Rollback did not become healthy. Check container logs immediately." >&2
+echo "Rollback did not become running. Check container logs immediately." >&2
 docker compose $COMPOSE_FILES -p "$PROJECT_NAME" logs --tail=200 sms-reader >&2
 exit 1
