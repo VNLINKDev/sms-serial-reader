@@ -186,7 +186,7 @@ public class SmsReaderRuntime {
         SmsMessage latest = allMessages.get(allMessages.size() - 1);
         String latestId = latest.getTransactionId();
 
-        log.info("Quét thấy {} SMS OTP, mới nhất: index={} transactionId={} timestamp={}.",
+        log.info("Quét thấy {} SMS OTP, thông tin SMS mới nhất đã gửi đi: latest.index={} latest.transactionId={} latest.timestamp={}.",
                 allMessages.size(), latest.getIndex(), latestId, latest.getTimestamp());
 
         scanResults.onNext(new ScanResult(latest, new ArrayList<>(allMessages)));
