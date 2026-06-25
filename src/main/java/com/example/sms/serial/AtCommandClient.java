@@ -67,7 +67,7 @@ public class AtCommandClient {
     public void sendRaw(String command) {
         OutputStream outputStream = portManager.getOutputStream();
         if (outputStream == null) {
-            throw new SerialPortException("Serial output stream is not available.");
+            throw new SerialPortException("Output stream của cổng serial không khả dụng.");
         }
         byte[] bytes = (command + "\r").getBytes(StandardCharsets.US_ASCII);
         try {
@@ -75,7 +75,7 @@ public class AtCommandClient {
             outputStream.flush();
             log.debug("[TX] {}", command);
         } catch (Exception e) {
-            throw new SerialPortException("Failed to write command '" + command + "': " + e.getMessage(), e);
+            throw new SerialPortException("Không thể ghi lệnh '" + command + "': " + e.getMessage(), e);
         }
     }
 
@@ -106,7 +106,7 @@ public class AtCommandClient {
 
                 if (n < 0) {
                     throw new SerialPortException(
-                            "Serial port stream closed while waiting for response to: " + command);
+                            "Stream của cổng serial đã đóng khi đang chờ phản hồi cho lệnh: " + command);
                 }
 
                 if (n == 0) {
@@ -131,7 +131,7 @@ public class AtCommandClient {
                     continue; // timeout bán-blocking bình thường
                 }
                 throw new SerialPortException(
-                        "Read error while waiting for response to '" + command + "': " + e.getMessage(), e);
+                        "Lỗi đọc khi đang chờ phản hồi cho lệnh '" + command + "': " + e.getMessage(), e);
             }
         }
 
@@ -153,11 +153,11 @@ public class AtCommandClient {
                 int read = is.read(buf, 0, Math.min(available, buf.length));
                 if (read <= 0)
                     break;
-                log.debug("Drained {} stale bytes from serial port.", read);
+                log.debug("Đã xả {} byte dữ liệu cũ khỏi cổng serial.", read);
                 available = is.available();
             }
         } catch (Exception e) {
-            log.debug("Failed to drain stale data (non-critical): {}", e.getMessage());
+            log.debug("Không thể xả dữ liệu cũ (không nghiêm trọng): {}", e.getMessage());
         }
     }
 

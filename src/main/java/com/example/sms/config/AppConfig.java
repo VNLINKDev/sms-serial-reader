@@ -69,12 +69,12 @@ public class AppConfig {
             "Ma\\s+giao\\s+dich\\s+(\\d+).*?OTP\\s*:?\\s*(\\d+)");
 
     public AppConfig() {
-        log.info("=== Application Configurations ===");
+        log.info("=== Cấu hình ứng dụng ===");
         log.info("SERIAL_PORT: {}", serialPort);
         log.info("BAUD_RATE: {}", baudRate);
         log.info("REDIS_HOST: {}", redisHost);
         log.info("REDIS_PORT: {}", redisPort);
-        log.info("REDIS_PASSWORD: {}", (redisPassword == null || redisPassword.isBlank()) ? "not set" : "********");
+        log.info("REDIS_PASSWORD: {}", (redisPassword == null || redisPassword.isBlank()) ? "chưa cấu hình" : "********");
         log.info("REDIS_DATABASE: {}", redisDatabase);
         log.info("REDIS_QUEUE_NAME: {}", redisQueueName);
         log.info("REDIS_MODE: {}", redisMode);
@@ -87,9 +87,9 @@ public class AppConfig {
         log.info("SIM_KEEP_RECENT: {}", simKeepRecent);
         log.info("TELEGRAM_ENABLED: {}", telegramEnabled);
         log.info("TELEGRAM_BOT_TOKEN: {}",
-                (telegramBotToken == null || telegramBotToken.isBlank()) ? "not set" : "********");
+                (telegramBotToken == null || telegramBotToken.isBlank()) ? "chưa cấu hình" : "********");
         log.info("TELEGRAM_CHAT_ID: {}",
-                (telegramChatId == null || telegramChatId.isBlank()) ? "not set" : telegramChatId);
+                (telegramChatId == null || telegramChatId.isBlank()) ? "chưa cấu hình" : telegramChatId);
         log.info("SMS_INDEX_CMGL_PATTERN: {}", smsIndexCmglPattern);
         log.info("SMS_OTP_PATTERN: {}", smsOtpPattern);
         log.info("==================================");

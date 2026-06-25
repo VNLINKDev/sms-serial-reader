@@ -141,4 +141,31 @@ class SmsReaderRuntimeTest {
         runtime.shutdown();
         runtimeThread.join(1000);
     }
+
+    @Test
+    @Timeout(value = 5, unit = SECONDS)
+    void testCleanupRunsEvenWhenDeleteAfterReadDisabled() throws Exception {
+        SmsMessage msg = new SmsMessage(1, "TX_TEST_KEEP", "111111", OffsetDateTime.now());
+
+        when(appConfig.isDeleteSmsAfterRead()).thenReturn(false);
+        when(smsService.readAndParseAll()).thenReturn(List.of(msg));
+
+        Thread runtimeThread = new Thread(() -> {
+            try {
+                runtime.run();
+            } catch (Exception e) {
+                fail("Runtime failed to run: " + e.getMessage());
+            }
+        });
+        runtimeThread.start();
+
+        await().atMost(2, SECONDS).untilAsserted(() -> {
+            verify(smsService, never()).deleteSms(1);
+            verify(smsService, atLeastOnce()).cleanupOldSms(anyList());
+        });
+
+        runtime.shutdown();
+        runtimeThread.join(1000);
+    }
+
 }

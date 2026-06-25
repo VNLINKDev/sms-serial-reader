@@ -27,7 +27,7 @@ public class ModemInitializer {
      * để application fail fast thay vì chạy ở trạng thái modem chưa xác định.
      */
     public void initialize() {
-        log.info("Initialising modem...");
+        log.info("Đang khởi tạo modem...");
 
         send("AT");                        // kiểm tra kết nối cơ bản
         send("ATE0");                      // tắt echo lệnh
@@ -37,7 +37,7 @@ public class ModemInitializer {
         send("AT+CPIN?");                  // trạng thái SIM
         send("AT+CSQ");                    // chất lượng tín hiệu
 
-        log.info("Modem initialised successfully. Waiting for incoming SMS...");
+        log.info("Modem đã khởi tạo thành công. Đang chờ SMS đến...");
     }
 
     private void send(String command) {

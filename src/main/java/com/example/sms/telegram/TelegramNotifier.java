@@ -36,7 +36,7 @@ public class TelegramNotifier {
 
     public void sendSync(SmsMessage msg) throws Exception {
         if (!config.isTelegramEnabled()) {
-            log.warn("Telegram is DISABLED (TELEGRAM_ENABLED=false), skipping notify for SMS index={}.",
+            log.warn("Telegram đang TẮT (TELEGRAM_ENABLED=false), bỏ qua thông báo cho SMS index={}.",
                     msg.getIndex());
             return;
         }
@@ -45,18 +45,18 @@ public class TelegramNotifier {
         String chatId = config.getTelegramChatId();
 
         if (botToken == null || botToken.isBlank()) {
-            log.warn("Telegram notification skipped: TELEGRAM_BOT_TOKEN is not configured.");
+            log.warn("Bỏ qua thông báo Telegram: TELEGRAM_BOT_TOKEN chưa được cấu hình.");
             return;
         }
         if (chatId == null || chatId.isBlank()) {
-            log.warn("Telegram notification skipped: TELEGRAM_CHAT_ID is not configured.");
+            log.warn("Bỏ qua thông báo Telegram: TELEGRAM_CHAT_ID chưa được cấu hình.");
             return;
         }
 
         String url = TELEGRAM_API_BASE + botToken + "/sendMessage";
         String text = buildMessageText(msg);
 
-        log.debug("Sending Telegram notification for SMS index={} transactionId={}...",
+        log.debug("Đang gửi thông báo Telegram cho SMS index={} transactionId={}...",
                 msg.getIndex(), msg.getTransactionId());
 
         sendMessage(url, chatId, text, msg.getIndex());
@@ -89,14 +89,14 @@ public class TelegramNotifier {
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() == 200) {
-            log.debug("Telegram HTTP 200 OK for SMS index={}.", smsIndex);
+            log.debug("Telegram trả về HTTP 200 OK cho SMS index={}.", smsIndex);
         } else {
             // Ném exception để caller biết gửi thất bại → lastTelegramTransactionId không
             // cập nhật
             throw new RuntimeException(
-                    "Telegram API returned HTTP " + response.statusCode()
-                            + " for SMS index=" + smsIndex
-                            + ". Body: " + response.body());
+                    "Telegram API trả về HTTP " + response.statusCode()
+                            + " cho SMS index=" + smsIndex
+                            + ". Nội dung: " + response.body());
         }
     }
 

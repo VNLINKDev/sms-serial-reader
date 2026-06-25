@@ -62,12 +62,12 @@ public class SmsService {
      * @return {@link Optional} chứa tin nhắn đã phân tích, hoặc rỗng nếu đọc thất bại.
      */
     public Optional<SmsMessage> readAndParse(int index) {
-        log.debug("Reading SMS at index {}...", index);
+        log.debug("Đang đọc SMS tại index {}...", index);
         try {
             String response = atClient.sendAndWait("AT+CMGR=" + index);
-            log.debug("Raw response for index {}: {}", index, response);
+            log.debug("Phản hồi thô cho index {}: {}", index, response);
             SmsMessage msg  = smsParser.parse(index, response);
-            log.debug("Parsed SMS at index {}: {}", index, msg);
+            log.debug("Đã phân tích SMS tại index {}: {}", index, msg);
             if (config.isDeleteSmsAfterRead()) {
                 deleteSms(index);
             }
@@ -77,11 +77,11 @@ public class SmsService {
         } catch (NonOtpSmsException e) {
             // SMS không phải OTP => xóa ngay khỏi SIM để giải phóng bộ nhớ,
             // bất kể cấu hình DELETE_SMS_AFTER_READ.
-            log.debug("SMS at index {} is not an OTP message — deleting from SIM: {}", index, e.getMessage());
+            log.debug("SMS tại index {} không phải OTP — đang xóa khỏi SIM: {}", index, e.getMessage());
             deleteSms(index);
             return Optional.empty();
         } catch (Exception e) {
-            log.error("Failed to read/parse SMS at index {}: {}", index, e.getMessage(), e);
+            log.error("Không thể đọc/phân tích SMS tại index {}: {}", index, e.getMessage(), e);
             return Optional.empty();
         }
     }
@@ -109,7 +109,7 @@ public class SmsService {
      */
     public List<SmsMessage> readAndParseAll() {
         List<Integer> indexes = listAllIndexes();
-        log.debug("Scheduled scan: found {} SMS on SIM, indexes: {}", indexes.size(), indexes);
+        log.debug("Quét định kỳ: tìm thấy {} SMS trên SIM, indexes: {}", indexes.size(), indexes);
 
         List<SmsMessage> messages = new ArrayList<>();
         for (int index : indexes) {
@@ -117,21 +117,21 @@ public class SmsService {
                 String response = atClient.sendAndWait("AT+CMGR=" + index);
                 SmsMessage msg = smsParser.parse(index, response);
                 messages.add(msg);
-                log.debug("Scheduled scan: parsed SMS at index {}: {}", index, msg);
+                log.debug("Quét định kỳ: đã phân tích SMS tại index {}: {}", index, msg);
             } catch (com.example.sms.exception.NonOtpSmsException e) {
-                log.debug("Scheduled scan: SMS at index {} is not OTP — deleting from SIM: {}", index, e.getMessage());
+                log.debug("Quét định kỳ: SMS tại index {} không phải OTP — đang xóa khỏi SIM: {}", index, e.getMessage());
                 deleteSms(index);
             } catch (SerialPortException | ModemTimeoutException e) {
                 throw e;
             } catch (Exception e) {
-                log.warn("Scheduled scan: could not read/parse SMS at index {}: {}", index, e.getMessage());
+                log.warn("Quét định kỳ: không thể đọc/phân tích SMS tại index {}: {}", index, e.getMessage());
             }
         }
 
         // Sắp xếp theo timestamp thực tế trong nội dung SMS.
         // Modem tái sử dụng slot đã xóa, nên index KHÔNG phản ánh thứ tự nhận.
         messages.sort(Comparator.comparing(msg -> msg.getTimestamp().toInstant()));
-        log.debug("Scheduled scan: {} OTP SMS parsed, ordered by timestamp.", messages.size());
+        log.debug("Quét định kỳ: đã phân tích {} SMS OTP, sắp xếp theo timestamp.", messages.size());
         return messages;
     }
     
@@ -145,9 +145,9 @@ public class SmsService {
     public void deleteSms(int index) {
         try {
             atClient.sendAndWait("AT+CMGD=" + index);
-            log.debug("Deleted SMS at index {}.", index);
+            log.debug("Đã xóa SMS tại index {}.", index);
         } catch (Exception e) {
-            log.warn("Could not delete SMS at index {}: {}", index, e.getMessage());
+            log.warn("Không thể xóa SMS tại index {}: {}", index, e.getMessage());
         }
     }
 
@@ -161,7 +161,7 @@ public class SmsService {
      */
     public List<Integer> listAllIndexes() {
         String response = atClient.sendAndWait("AT+CMGL=\"ALL\"");
-        log.debug("Raw all-SMS list response: {}", response);
+        log.debug("Phản hồi thô danh sách toàn bộ SMS: {}", response);
 
         List<Integer> indexes = new ArrayList<>();
         Matcher matcher = cmglIndexPattern.matcher(response);
@@ -213,12 +213,12 @@ public class SmsService {
         int keepRecent    = config.getSimKeepRecent();
 
         if (total < highWatermark) {
-            log.debug("SIM has {} OTP SMS — below watermark ({}), no cleanup needed.",
+            log.debug("SIM có {} SMS OTP — dưới ngưỡng dọn dẹp ({}), không cần dọn dẹp.",
                     total, highWatermark);
             return 0;
         }
 
-        log.info("SIM has {} OTP SMS — exceeds watermark ({}), starting cleanup (keeping {} recent).",
+        log.info("SIM có {} SMS OTP — vượt ngưỡng dọn dẹp ({}), bắt đầu dọn dẹp (giữ {} SMS gần nhất).",
                 total, highWatermark, keepRecent);
 
         // allOtpSms đã sort timestamp tăng dần: phần tử đầu = cũ nhất, cuối = mới nhất.
@@ -226,7 +226,7 @@ public class SmsService {
         List<SmsMessage> toDelete = allOtpSms.subList(0, deleteCount);
         List<SmsMessage> toKeep   = allOtpSms.subList(deleteCount, total);
 
-        log.info("Cleanup plan: deleting {} SMS (timestamps: {} → {}), keeping {} SMS.",
+        log.info("Kế hoạch dọn dẹp: xóa {} SMS (timestamps: {} → {}), giữ lại {} SMS.",
                 toDelete.size(),
                 toDelete.isEmpty() ? "-" : toDelete.get(0).getTimestamp(),
                 toDelete.isEmpty() ? "-" : toDelete.get(toDelete.size() - 1).getTimestamp(),
@@ -237,13 +237,13 @@ public class SmsService {
             try {
                 atClient.sendAndWait("AT+CMGD=" + msg.getIndex());
                 deleted++;
-                log.debug("Cleanup: deleted SMS at index={} timestamp={}.", msg.getIndex(), msg.getTimestamp());
+                log.debug("Dọn dẹp: đã xóa SMS tại index={} timestamp={}.", msg.getIndex(), msg.getTimestamp());
             } catch (Exception e) {
-                log.warn("Cleanup: failed to delete SMS at index={}: {}", msg.getIndex(), e.getMessage());
+                log.warn("Dọn dẹp: không thể xóa SMS tại index={}: {}", msg.getIndex(), e.getMessage());
             }
         }
 
-        log.info("Cleanup complete: deleted {}/{} OTP SMS, {} remaining on SIM.",
+        log.info("Dọn dẹp hoàn tất: đã xóa {}/{} SMS OTP, còn lại {} SMS trên SIM.",
                 deleted, toDelete.size(), total - deleted);
 
         return deleted;

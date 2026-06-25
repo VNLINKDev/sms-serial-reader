@@ -10,6 +10,9 @@ import com.example.sms.redis.RedisPublisher;
 import com.example.sms.telegram.TelegramNotifier;
 import com.example.sms.app.SmsReaderRuntime;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
  * Entry Point (Bootstrap Class) của ứng dụng Java SE thuần.
  *
@@ -20,7 +23,7 @@ public class SmsReaderApplication {
 
     public static void main(String[] args) {
         System.out.println("==================================================");
-        System.out.println("Starting pure Java SMS Serial Reader (Vanilla)...");
+        System.out.println("Đang khởi động ứng dụng đọc SMS qua Serial (Java thuần)...");
         System.out.println("==================================================");
 
         // 1. Khởi tạo cấu hình từ biến môi trường
@@ -31,7 +34,7 @@ public class SmsReaderApplication {
         try {
             portManager.open();
         } catch (Exception e) {
-            System.err.println("CRITICAL: Failed to open serial port on startup: " + e.getMessage());
+            System.err.println("NGHIÊM TRỌNG: Không thể mở cổng serial khi khởi động: " + e.getMessage());
             System.exit(1);
         }
 
@@ -48,7 +51,8 @@ public class SmsReaderApplication {
         try {
             redisPublisher.connect();
         } catch (Exception e) {
-            System.err.println("CRITICAL: Failed to connect to Redis on startup: " + e.getMessage());
+            System.err.println("NGHIÊM TRỌNG: Không thể kết nối Redis khi khởi động: " + e.getMessage());
+            closeQuietly(redisPublisher, "Redis publisher");
             portManager.close();
             System.exit(1);
         }
@@ -63,34 +67,60 @@ public class SmsReaderApplication {
                 portManager, modemInitializer,
                 smsService, redisPublisher, telegramNotifier, config);
 
+        CountDownLatch shutdownLatch = new CountDownLatch(1);
+        AtomicBoolean shutdownStarted = new AtomicBoolean(false);
+
+        // 8. Đăng ký JVM Shutdown Hook trước khi runtime start để mọi failure sau
+        // điểm này đều đi qua cùng một đường cleanup.
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.println("==================================================");
+            System.out.println("JVM đã kích hoạt hook tắt ứng dụng. Đang tắt an toàn...");
+            System.out.println("==================================================");
+
+            shutdownGracefully(runtime, redisPublisher, shutdownStarted);
+            shutdownLatch.countDown();
+        }, "sms-reader-shutdown-hook"));
+
         try {
             runtime.run();
         } catch (Exception e) {
-            System.err.println("CRITICAL: SMS Reader Runtime run failed: " + e.getMessage());
-            redisPublisher.close();
-            portManager.close();
+            System.err.println("NGHIÊM TRỌNG: Bộ chạy đọc SMS khởi chạy thất bại: " + e.getMessage());
+            shutdownGracefully(runtime, redisPublisher, shutdownStarted);
             System.exit(1);
         }
 
-        // 8. Đăng ký JVM Shutdown Hook để tắt ứng dụng an toàn (Graceful Shutdown)
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.out.println("==================================================");
-            System.out.println("JVM Shutdown Hook triggered. Shutting down gracefully...");
-            System.out.println("==================================================");
+        try {
+            shutdownLatch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            shutdownGracefully(runtime, redisPublisher, shutdownStarted);
+            System.exit(1);
+        }
+    }
 
-            try {
-                runtime.shutdown();
-            } catch (Exception e) {
-                System.err.println("Error shutting down runtime: " + e.getMessage());
-            }
+    private static void shutdownGracefully(
+            SmsReaderRuntime runtime,
+            RedisPublisher redisPublisher,
+            AtomicBoolean shutdownStarted) {
+        if (!shutdownStarted.compareAndSet(false, true)) {
+            return;
+        }
 
-            try {
-                redisPublisher.close();
-            } catch (Exception e) {
-                System.err.println("Error closing Redis publisher: " + e.getMessage());
-            }
+        try {
+            runtime.shutdown();
+        } catch (Exception e) {
+            System.err.println("Lỗi khi tắt runtime: " + e.getMessage());
+        }
 
-            System.out.println("Shutdown complete. Bye!");
-        }));
+        closeQuietly(redisPublisher, "bộ phát Redis");
+        System.out.println("Đã tắt ứng dụng hoàn tất. Tạm biệt!");
+    }
+
+    private static void closeQuietly(AutoCloseable resource, String name) {
+        try {
+            resource.close();
+        } catch (Exception e) {
+            System.err.println("Lỗi khi đóng " + name + ": " + e.getMessage());
+        }
     }
 }

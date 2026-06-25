@@ -69,7 +69,7 @@ class SmsParserTest {
             parser.parse(2, rawResponse);
         });
 
-        assertTrue(exception.getMessage().contains("Cannot extract OTP"));
+        assertTrue(exception.getMessage().contains("Không thể trích xuất OTP"));
     }
 
     @Test
@@ -80,7 +80,7 @@ class SmsParserTest {
             parser.parse(3, rawResponse);
         });
 
-        assertEquals("No +CMGR header found", exception.getMessage());
+        assertEquals("Không tìm thấy header +CMGR", exception.getMessage());
     }
 
     @Test
@@ -94,7 +94,7 @@ class SmsParserTest {
             parser.parse(4, rawResponse);
         });
 
-        assertEquals("Invalid CMGR header", exception.getMessage());
+        assertEquals("Header CMGR không hợp lệ", exception.getMessage());
     }
 
     @Test

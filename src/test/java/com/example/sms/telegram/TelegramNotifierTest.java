@@ -123,7 +123,7 @@ class TelegramNotifierTest {
             telegramNotifier.sendSync(message);
         });
 
-        assertTrue(exception.getMessage().contains("Telegram API returned HTTP 400"));
+        assertTrue(exception.getMessage().contains("Telegram API trả về HTTP 400"));
         assertTrue(exception.getMessage().contains("Bad Request: chat not found"));
     }
 }

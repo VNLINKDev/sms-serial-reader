@@ -62,12 +62,12 @@ public class SmsParser {
         }
 
         if (headerLine == null) {
-            throw new SmsParseException("No +CMGR header found");
+            throw new SmsParseException("Không tìm thấy header +CMGR");
         }
 
         Matcher headerMatcher = CMGR_HEADER_PATTERN.matcher(headerLine);
         if (!headerMatcher.find()) {
-            throw new SmsParseException("Invalid CMGR header");
+            throw new SmsParseException("Header CMGR không hợp lệ");
         }
 
         String tsRaw = headerMatcher.group(3);
@@ -88,7 +88,7 @@ public class SmsParser {
         Matcher otpMatcher = otpPattern.matcher(body);
 
         if (!otpMatcher.find()) {
-            throw new NonOtpSmsException("Cannot extract OTP from SMS body: " + body);
+            throw new NonOtpSmsException("Không thể trích xuất OTP từ nội dung SMS: " + body);
         }
 
         String transactionId = otpMatcher.group(1);

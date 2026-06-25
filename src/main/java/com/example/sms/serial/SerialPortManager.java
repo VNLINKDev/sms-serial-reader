@@ -49,7 +49,7 @@ public class SerialPortManager implements AutoCloseable {
     public void open() {
         String portName = config.getSerialPort();
         int baudRate = config.getBaudRate();
-        log.info("Opening serial port {} @ {} baud. Available ports: {}",
+        log.info("Đang mở cổng serial {} @ {} baud. Các cổng hiện có: {}",
                 portName, baudRate, listAvailablePorts());
 
         port = SerialPort.getCommPort(portName);
@@ -65,13 +65,13 @@ public class SerialPortManager implements AutoCloseable {
 
         if (!port.openPort()) {
             throw new SerialPortException(
-                    "Cannot open port '" + portName + "'. Available: " + listAvailablePorts());
+                    "Không thể mở cổng '" + portName + "'. Các cổng hiện có: " + listAvailablePorts());
         }
 
         inputStream  = port.getInputStream();
         outputStream = port.getOutputStream();
 
-        log.info("Serial port {} opened successfully.", portName);
+        log.info("Đã mở cổng serial {} thành công.", portName);
     }
 
     /**
@@ -85,7 +85,7 @@ public class SerialPortManager implements AutoCloseable {
 
         if (port != null && port.isOpen()) {
             port.closePort();
-            log.info("Serial port {} closed.", config.getSerialPort());
+            log.info("Đã đóng cổng serial {}.", config.getSerialPort());
         }
     }
 
@@ -99,7 +99,7 @@ public class SerialPortManager implements AutoCloseable {
      * @throws SerialPortException nếu không mở lại được port.
      */
     public void reconnect() {
-        log.warn("Reconnecting serial port '{}'...", config.getSerialPort());
+        log.warn("Đang kết nối lại cổng serial '{}'...", config.getSerialPort());
         close();
         open();
     }
@@ -142,7 +142,7 @@ public class SerialPortManager implements AutoCloseable {
 
     private void assertOpen() {
         if (!isOpen()) {
-            throw new SerialPortException("Serial port is not open.");
+            throw new SerialPortException("Cổng serial chưa được mở.");
         }
     }
 

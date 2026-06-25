@@ -73,7 +73,7 @@ public class RedisPublisher implements AutoCloseable {
         connection = redisClient.connect();
         commands = connection.sync();
 
-        log.info("Connected to Redis at {}:{}/db{}.",
+        log.info("Đã kết nối Redis tại {}:{}/db{}.",
                 config.getRedisHost(), config.getRedisPort(), config.getRedisDatabase());
     }
 
@@ -85,7 +85,7 @@ public class RedisPublisher implements AutoCloseable {
         if (redisClient != null) {
             redisClient.shutdown();
         }
-        log.info("Redis connection closed.");
+        log.info("Đã đóng kết nối Redis.");
     }
 
     // -------------------------------------------------------------------------
@@ -113,16 +113,16 @@ public class RedisPublisher implements AutoCloseable {
         try {
             if (config.getRedisMode() == AppConfig.RedisMode.LIST) {
                 commands.rpush(target, json);
-                log.info("RPUSH SMS index={} transactionId={} to list '{}'.",
+                log.info("Đã RPUSH SMS index={} transactionId={} vào list '{}'.",
                         message.getIndex(), message.getTransactionId(), target);
             } else {
                 commands.set(target, json);
-                log.info("SET SMS index={} transactionId={} to key '{}'.",
+                log.info("Đã SET SMS index={} transactionId={} vào key '{}'.",
                         message.getIndex(), message.getTransactionId(), target);
             }
         } catch (Exception e) {
             throw new RedisPublishException(
-                    "Redis publish failed for SMS index=" + message.getIndex()
+                    "Gửi Redis thất bại cho SMS index=" + message.getIndex()
                             + " transactionId=" + message.getTransactionId(),
                     e);
         }
@@ -157,7 +157,7 @@ public class RedisPublisher implements AutoCloseable {
             return mapper.writeValueAsString(payload);
         } catch (Exception e) {
             throw new IllegalStateException(
-                    "JSON serialization failed for SMS index=" + msg.getIndex() + ": " + e.getMessage(), e);
+                    "Serialize JSON thất bại cho SMS index=" + msg.getIndex() + ": " + e.getMessage(), e);
         }
     }
 
