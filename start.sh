@@ -65,7 +65,7 @@ set +o allexport
 
 # Lấy SERVER_PORT từ env, mặc định 8080
 SERVER_PORT="${SERVER_PORT:-8080}"
-JAVA_OPTS="${JAVA_OPTS:--XX:MaxRAMPercentage=50 -XX:+UseSerialGC -Xss256k -XX:TieredStopAtLevel=1 -XX:+ExitOnOutOfMemoryError}"
+JAVA_OPTS="${JAVA_OPTS:--Xms64m -Xmx256m -XX:+UseSerialGC -Xss256k -XX:TieredStopAtLevel=1 -XX:+ExitOnOutOfMemoryError}"
 APP_LOG_DIR="${LOG_PATH:-$LOG_DIR}"
 APP_LOG_FILE="$APP_LOG_DIR/sms-reader.log"
 mkdir -p "$APP_LOG_DIR" 2>/dev/null || true
@@ -80,6 +80,7 @@ echo -e "  BOOTLOG : ${BOOT_LOG_FILE}"
 echo -e "  APPLOG  : ${APP_LOG_FILE}"
 echo -e "  PORT    : ${SERVER_PORT}"
 echo -e "  SERIAL  : ${SERIAL_DEVICE:-/dev/ttyUSB0}"
+echo -e "  JAVA_OPTS: ${JAVA_OPTS}"
 echo ""
 
 # --- Khởi động app ---
