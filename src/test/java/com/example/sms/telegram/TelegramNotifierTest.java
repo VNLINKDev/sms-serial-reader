@@ -6,14 +6,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.lang.reflect.Field;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 
@@ -27,20 +22,13 @@ class TelegramNotifierTest {
     private AppConfig config;
 
     @Mock
-    private HttpClient httpClient;
+    private TelegramNotifier.HttpSender httpSender;
 
-    @Mock
-    private HttpResponse<String> httpResponse;
-
-    @InjectMocks
     private TelegramNotifier telegramNotifier;
 
     @BeforeEach
-    void setUp() throws Exception {
-        // Inject mock HttpClient using reflection
-        Field field = telegramNotifier.getClass().getDeclaredField("httpClient");
-        field.setAccessible(true);
-        field.set(telegramNotifier, httpClient);
+    void setUp() {
+        telegramNotifier = new TelegramNotifier(config, httpSender);
     }
 
     @Test
@@ -50,7 +38,7 @@ class TelegramNotifierTest {
         SmsMessage message = new SmsMessage(1, "TX100", "987654", OffsetDateTime.now());
         telegramNotifier.sendSync(message);
 
-        verify(httpClient, never()).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+        verifyNoInteractions(httpSender);
     }
 
     @Test
@@ -63,7 +51,7 @@ class TelegramNotifierTest {
         SmsMessage message = new SmsMessage(1, "TX100", "987654", OffsetDateTime.now());
         telegramNotifier.sendSync(message);
 
-        verify(httpClient, never()).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+        verifyNoInteractions(httpSender);
     }
 
     @Test
@@ -75,7 +63,7 @@ class TelegramNotifierTest {
         SmsMessage message = new SmsMessage(1, "TX100", "987654", OffsetDateTime.now());
         telegramNotifier.sendSync(message);
 
-        verify(httpClient, never()).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+        verifyNoInteractions(httpSender);
     }
 
     @Test
@@ -84,9 +72,8 @@ class TelegramNotifierTest {
         when(config.getTelegramBotToken()).thenReturn("my-token");
         when(config.getTelegramChatId()).thenReturn("my-chat-id");
 
-        when(httpResponse.statusCode()).thenReturn(200);
-        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(httpResponse);
+        when(httpSender.postJson(anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(new TelegramNotifier.HttpResult(200, "OK"));
 
         SmsMessage message = new SmsMessage(
                 1, 
@@ -97,13 +84,14 @@ class TelegramNotifierTest {
 
         telegramNotifier.sendSync(message);
 
-        ArgumentCaptor<HttpRequest> requestCaptor = ArgumentCaptor.forClass(HttpRequest.class);
-        verify(httpClient, times(1)).send(requestCaptor.capture(), any(HttpResponse.BodyHandler.class));
+        ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(httpSender, times(1)).postJson(urlCaptor.capture(), bodyCaptor.capture(), eq(10_000), eq(15_000));
 
-        HttpRequest request = requestCaptor.getValue();
-        assertEquals("POST", request.method());
-        assertEquals("https://api.telegram.org/botmy-token/sendMessage", request.uri().toString());
-        assertEquals("application/json; charset=UTF-8", request.headers().firstValue("Content-Type").orElse(""));
+        assertEquals("https://api.telegram.org/botmy-token/sendMessage", urlCaptor.getValue());
+        assertTrue(bodyCaptor.getValue().contains("\"chat_id\":\"my-chat-id\""));
+        assertTrue(bodyCaptor.getValue().contains("\"parse_mode\":\"HTML\""));
+        assertTrue(bodyCaptor.getValue().contains("TX100"));
     }
 
     @Test
@@ -112,10 +100,8 @@ class TelegramNotifierTest {
         when(config.getTelegramBotToken()).thenReturn("my-token");
         when(config.getTelegramChatId()).thenReturn("my-chat-id");
 
-        when(httpResponse.statusCode()).thenReturn(400);
-        when(httpResponse.body()).thenReturn("Bad Request: chat not found");
-        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(httpResponse);
+        when(httpSender.postJson(anyString(), anyString(), anyInt(), anyInt()))
+                .thenReturn(new TelegramNotifier.HttpResult(400, "Bad Request: chat not found"));
 
         SmsMessage message = new SmsMessage(1, "TX100", "987654", OffsetDateTime.now());
 

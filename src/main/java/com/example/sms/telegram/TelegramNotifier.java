@@ -7,11 +7,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
 
@@ -23,14 +22,16 @@ public class TelegramNotifier {
     private static final DateTimeFormatter DISPLAY_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final AppConfig config;
-    private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
+    private final HttpSender httpSender;
 
     public TelegramNotifier(AppConfig config) {
+        this(config, new UrlConnectionHttpSender());
+    }
+
+    TelegramNotifier(AppConfig config, HttpSender httpSender) {
         this.config = config;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
+        this.httpSender = httpSender;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -79,24 +80,17 @@ public class TelegramNotifier {
 
         String body = objectMapper.writeValueAsString(payload);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(15))
-                .header("Content-Type", "application/json; charset=UTF-8")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
+        HttpResult response = httpSender.postJson(url, body, 10_000, 15_000);
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        if (response.statusCode() == 200) {
+        if (response.statusCode == 200) {
             log.debug("Telegram trả về HTTP 200 OK cho SMS index={}.", smsIndex);
         } else {
             // Ném exception để caller biết gửi thất bại → lastTelegramTransactionId không
             // cập nhật
             throw new RuntimeException(
-                    "Telegram API trả về HTTP " + response.statusCode()
+                    "Telegram API trả về HTTP " + response.statusCode
                             + " cho SMS index=" + smsIndex
-                            + ". Nội dung: " + response.body());
+                            + ". Nội dung: " + response.body);
         }
     }
 
@@ -123,5 +117,56 @@ public class TelegramNotifier {
         return text.replace("&", "&amp;")
                 .replace("<", "&lt;")
                 .replace(">", "&gt;");
+    }
+
+    @FunctionalInterface
+    interface HttpSender {
+        HttpResult postJson(String url, String body, int connectTimeoutMs, int readTimeoutMs) throws Exception;
+    }
+
+    static final class HttpResult {
+        private final int statusCode;
+        private final String body;
+
+        HttpResult(int statusCode, String body) {
+            this.statusCode = statusCode;
+            this.body = body;
+        }
+    }
+
+    private static final class UrlConnectionHttpSender implements HttpSender {
+        @Override
+        public HttpResult postJson(String url, String body, int connectTimeoutMs, int readTimeoutMs) throws Exception {
+            HttpURLConnection connection = (HttpURLConnection) URI.create(url).toURL().openConnection();
+            try {
+                connection.setRequestMethod("POST");
+                connection.setConnectTimeout(connectTimeoutMs);
+                connection.setReadTimeout(readTimeoutMs);
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+
+                byte[] payload = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                connection.setFixedLengthStreamingMode(payload.length);
+                try (OutputStream os = connection.getOutputStream()) {
+                    os.write(payload);
+                }
+
+                int statusCode = connection.getResponseCode();
+                String responseBody = readBody(
+                        statusCode >= 400 ? connection.getErrorStream() : connection.getInputStream());
+                return new HttpResult(statusCode, responseBody);
+            } finally {
+                connection.disconnect();
+            }
+        }
+
+        private static String readBody(InputStream inputStream) throws Exception {
+            if (inputStream == null) {
+                return "";
+            }
+            try (InputStream is = inputStream) {
+                return new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            }
+        }
     }
 }

@@ -27,6 +27,7 @@ public class AtCommandClient {
     private static final Logger log = LoggerFactory.getLogger(AtCommandClient.class);
 
     private static final int DEFAULT_TIMEOUT_MS = 8_000;
+    private static final int STALE_DRAIN_LIMIT_BYTES = 64 * 1024;
 
     private final SerialPortManager portManager;
 
@@ -128,6 +129,7 @@ public class AtCommandClient {
                 throw e;
             } catch (Exception e) {
                 if (isReadTimeout(e)) {
+                    sleepQuietly(50);
                     continue; // timeout bán-blocking bình thường
                 }
                 throw new SerialPortException(
@@ -149,12 +151,17 @@ public class AtCommandClient {
             InputStream is = portManager.getInputStream();
             byte[] buf = new byte[4096];
             int available = is.available();
-            while (available > 0) {
+            int drained = 0;
+            while (available > 0 && drained < STALE_DRAIN_LIMIT_BYTES) {
                 int read = is.read(buf, 0, Math.min(available, buf.length));
                 if (read <= 0)
                     break;
+                drained += read;
                 log.debug("Đã xả {} byte dữ liệu cũ khỏi cổng serial.", read);
                 available = is.available();
+            }
+            if (available > 0) {
+                log.warn("Dừng xả dữ liệu cũ sau {} byte để tránh kẹt vòng lặp đọc serial.", drained);
             }
         } catch (Exception e) {
             log.debug("Không thể xả dữ liệu cũ (không nghiêm trọng): {}", e.getMessage());

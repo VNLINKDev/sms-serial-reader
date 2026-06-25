@@ -16,6 +16,7 @@ import org.slf4j.LoggerFactory;
 public class AppConfig {
 
     private static final Logger log = LoggerFactory.getLogger(AppConfig.class);
+    private static final long MIN_UNREAD_POLL_INTERVAL_MS = 1_000L;
 
     private final String serialPort = getEnv("SERIAL_PORT", "COM5");
     private final int baudRate = getEnvInt("BAUD_RATE", 115200);
@@ -35,7 +36,10 @@ public class AppConfig {
     private final String redisLatestKey = getEnv("REDIS_LATEST_KEY", "sms:latest");
 
     private final boolean deleteSmsAfterRead = getEnvBoolean("DELETE_SMS_AFTER_READ", false);
-    private final long unreadPollIntervalMs = getEnvLong("UNREAD_POLL_INTERVAL_MS", 60000L);
+    private final long unreadPollIntervalMs = getEnvLongAtLeast(
+            "UNREAD_POLL_INTERVAL_MS",
+            60000L,
+            MIN_UNREAD_POLL_INTERVAL_MS);
 
     /**
      * Ngưỡng số SMS trên SIM kích hoạt cleanup tự động.
@@ -139,6 +143,15 @@ public class AppConfig {
         } catch (NumberFormatException e) {
             return defaultValue;
         }
+    }
+
+    private static long getEnvLongAtLeast(String name, long defaultValue, long minValue) {
+        long value = getEnvLong(name, defaultValue);
+        if (value < minValue) {
+            log.warn("{}={} quá thấp, tự động dùng {} để tránh quét liên tục.", name, value, minValue);
+            return minValue;
+        }
+        return value;
     }
 
     private static boolean getEnvBoolean(String name, boolean defaultValue) {
