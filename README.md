@@ -231,15 +231,3 @@ mvn test
 5. Đẩy nhánh lên remote repository (`git push origin feature/AmazingFeature`).
 6. Tạo một Pull Request để kiểm duyệt.
 
----
-
-## 📄 License
-
-[TODO: Bổ sung thông tin LICENSE cho dự án]
-
----
-
-## 👥 Tác giả & Liên hệ
-
-*   **Tác giả:** [TODO: Bổ sung thông tin Tác giả]
-*   **Dự án:** [LTKhanhh/sms-serial-reader](https://github.com/LTKhanhh/sms-serial-reader) (hoặc thông tin repository nội bộ).
