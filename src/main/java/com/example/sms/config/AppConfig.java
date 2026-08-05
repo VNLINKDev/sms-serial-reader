@@ -25,7 +25,7 @@ public class AppConfig {
     private final int redisPort = getEnvInt("REDIS_PORT", 6379);
     private final String redisPassword = getEnv("REDIS_PASSWORD", "");
     private final int redisDatabase = getEnvInt("REDIS_DATABASE", 0);
-    private final String redisQueueName = getEnv("REDIS_QUEUE_NAME", "sms:incoming");
+    private final String redisQueueName = getEnv("REDIS_QUEUE_NAME", "sms:incoming:84832019510");
     private final RedisMode redisMode = getEnvEnum("REDIS_MODE", RedisMode.class, RedisMode.VALUE);
     private final int redisPublishRetries = getEnvInt("REDIS_PUBLISH_RETRIES", 3);
     private final long redisTimeoutMs = getEnvLong("REDIS_TIMEOUT_MS", 10000L);
