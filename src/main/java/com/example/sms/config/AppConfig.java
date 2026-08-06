@@ -25,7 +25,11 @@ public class AppConfig {
     private final int redisPort = getEnvInt("REDIS_PORT", 6379);
     private final String redisPassword = getEnv("REDIS_PASSWORD", "");
     private final int redisDatabase = getEnvInt("REDIS_DATABASE", 0);
-    private final String redisQueueName = getEnv("REDIS_QUEUE_NAME", "sms:incoming:84832019510");
+    private final String phoneNumber = getEnv("PHONE_NUMBER", "0");
+    private final String redisQueueName = buildRedisQueueKey(
+            getEnv("REDIS_QUEUE_NAME", "sms:incoming"),
+            phoneNumber
+    );
     private final RedisMode redisMode = getEnvEnum("REDIS_MODE", RedisMode.class, RedisMode.VALUE);
     private final int redisPublishRetries = getEnvInt("REDIS_PUBLISH_RETRIES", 3);
     private final long redisTimeoutMs = getEnvLong("REDIS_TIMEOUT_MS", 10000L);
@@ -105,6 +109,26 @@ public class AppConfig {
     public enum RedisMode {
         VALUE,
         LIST
+    }
+
+    private static String buildRedisQueueKey(String queueName, String phoneNo) {
+
+        if (phoneNo == null || phoneNo.isBlank()) {
+            throw new IllegalStateException(
+                    "REDIS_QUEUE_NAME_PHONE_NO không được để trống"
+            );
+        }
+
+        String normalizedQueueName = queueName.trim();
+
+        while (normalizedQueueName.endsWith(":")) {
+            normalizedQueueName = normalizedQueueName.substring(
+                    0,
+                    normalizedQueueName.length() - 1
+            );
+        }
+
+        return normalizedQueueName + ":" + phoneNo.trim();
     }
 
     private static String getEnv(String name, String defaultValue) {
