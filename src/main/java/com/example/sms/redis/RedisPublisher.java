@@ -149,8 +149,10 @@ public class RedisPublisher implements AutoCloseable {
      */
     private String toJson(SmsMessage msg) {
         try {
+            String phoneNumber = config.getPhoneNumber();
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("index", msg.getIndex());
+            payload.put("phoneNumber", phoneNumber);
             payload.put("transactionId", msg.getTransactionId());
             payload.put("otp", msg.getOtp());
             payload.put("timestamp", msg.getTimestamp());
