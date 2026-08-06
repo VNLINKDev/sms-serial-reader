@@ -112,13 +112,6 @@ public class AppConfig {
     }
 
     private static String buildRedisQueueKey(String queueName, String phoneNo) {
-
-        if (phoneNo == null || phoneNo.isBlank()) {
-            throw new IllegalStateException(
-                    "REDIS_QUEUE_NAME_PHONE_NO không được để trống"
-            );
-        }
-
         String normalizedQueueName = queueName.trim();
 
         while (normalizedQueueName.endsWith(":")) {
