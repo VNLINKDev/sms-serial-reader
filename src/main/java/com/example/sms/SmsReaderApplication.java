@@ -9,6 +9,7 @@ import com.example.sms.smsreader.SmsService;
 import com.example.sms.redis.RedisPublisher;
 import com.example.sms.telegram.TelegramNotifier;
 import com.example.sms.app.SmsReaderRuntime;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -19,6 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Chịu trách nhiệm khởi tạo cấu hình, kết nối Serial Port, Redis,
  * và điều phối Core Runtime.
  */
+@Slf4j
 public class SmsReaderApplication {
 
     public static void main(String[] args) {
@@ -28,6 +30,10 @@ public class SmsReaderApplication {
 
         // 1. Khởi tạo cấu hình từ biến môi trường
         AppConfig config = new AppConfig();
+        if (config.getPhoneNumber() == null) {
+            System.out.println("PHONE_NUMBER chưa được cấu hình");
+            System.exit(1);
+        }
 
         // 2. Khởi tạo và mở cổng Serial Port
         SerialPortManager portManager = new SerialPortManager(config);

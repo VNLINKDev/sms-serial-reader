@@ -25,7 +25,7 @@ public class AppConfig {
     private final int redisPort = getEnvInt("REDIS_PORT", 6379);
     private final String redisPassword = getEnv("REDIS_PASSWORD", "");
     private final int redisDatabase = getEnvInt("REDIS_DATABASE", 0);
-    private final String phoneNumber = getEnv("PHONE_NUMBER", "0");
+    private final String phoneNumber = getEnv("PHONE_NUMBER", null);
     private final String redisQueueName = buildRedisQueueKey(
             getEnv("REDIS_QUEUE_NAME", "sms:incoming"),
             phoneNumber
@@ -78,6 +78,7 @@ public class AppConfig {
 
     public AppConfig() {
         log.info("=== Cấu hình ứng dụng ===");
+        log.info("HỆ THỐNG ĐÃ ĐƯỢC CẤU HÌNH VỚI SIM SỐ ĐIỆN THOẠI: {}",phoneNumber);
         log.info("SERIAL_PORT: {}", serialPort);
         log.info("BAUD_RATE: {}", baudRate);
         log.info("REDIS_HOST: {}", redisHost);
@@ -112,6 +113,7 @@ public class AppConfig {
     }
 
     private static String buildRedisQueueKey(String queueName, String phoneNo) {
+
         String normalizedQueueName = queueName.trim();
 
         while (normalizedQueueName.endsWith(":")) {
