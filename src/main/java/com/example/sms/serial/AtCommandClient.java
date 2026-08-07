@@ -140,6 +140,10 @@ public class AtCommandClient {
         throw new ModemTimeoutException(command, timeoutMs);
     }
 
+    public void drainStale(){
+        drainStaleData();
+    }
+
     /**
      * Xả dữ liệu cũ trong serial port input buffer trước khi gửi command mới.
      *
@@ -195,4 +199,75 @@ public class AtCommandClient {
             Thread.currentThread().interrupt();
         }
     }
+    /**
+     * Ghi thẳng {@code bytes} xuống output stream, KHÔNG tự thêm {@code \r}
+     * như {@link #sendRaw(String)}. Dùng khi caller cần tự kiểm soát framing
+     * byte-level, ví dụ ghi nội dung SMS kết thúc bằng Ctrl+Z (0x1A).
+     */
+    public void writeRawBytes(byte[] bytes) {
+        OutputStream outputStream = portManager.getOutputStream();
+        if (outputStream == null) {
+            throw new SerialPortException("Output stream của cổng serial không khả dụng.");
+        }
+        try {
+            outputStream.write(bytes);
+            outputStream.flush();
+            log.debug("[TX-RAW] {} byte(s)", bytes.length);
+        } catch (Exception e) {
+            throw new SerialPortException("Không thể ghi dữ liệu thô xuống cổng serial: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Đọc từ serial port cho đến khi buffer chứa {@code token} hoặc hết
+     * timeout. Dùng cho dấu nhắc đặc biệt không phải OK/ERROR — ví dụ dấu
+     * nhắc {@code >} mà modem trả về sau {@code AT+CMGS} để chờ nội dung SMS.
+     *
+     * @throws ModemTimeoutException nếu không thấy {@code token} trong hạn.
+     * @throws SerialPortException   nếu stream bị đóng hoặc lỗi I/O.
+     */
+    public String waitForToken(String token, int timeoutMs, String context) {
+        InputStream is = portManager.getInputStream();
+        StringBuilder buffer = new StringBuilder();
+        byte[] buf = new byte[256];
+        long deadline = System.currentTimeMillis() + timeoutMs;
+
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                int n = is.read(buf);
+                if (n < 0) {
+                    throw new SerialPortException(
+                            "Stream của cổng serial đã đóng khi đang chờ token '" + token + "' (" + context + ").");
+                }
+                if (n == 0) {
+                    sleepQuietly(50);
+                    continue;
+                }
+                buffer.append(new String(buf, 0, n, StandardCharsets.US_ASCII));
+                if (buffer.indexOf(token) >= 0) {
+                    return buffer.toString();
+                }
+            } catch (SerialPortException e) {
+                throw e;
+            } catch (Exception e) {
+                if (isReadTimeout(e)) {
+                    sleepQuietly(50);
+                    continue;
+                }
+                throw new SerialPortException(
+                        "Lỗi đọc khi chờ token '" + token + "' (" + context + "): " + e.getMessage(), e);
+            }
+        }
+        throw new ModemTimeoutException(context + " (chờ token '" + token + "')", timeoutMs);
+    }
+
+    /**
+     * Bản public của {@link #readResponse(int, String)} — cho tầng nghiệp vụ
+     * đọc response kết thúc bằng OK/ERROR sau khi đã tự ghi dữ liệu thô xuống
+     * stream (vd. sau khi ghi nội dung SMS + Ctrl+Z).
+     */
+    public String readTerminatedResponse(int timeoutMs, String context) {
+        return readResponse(timeoutMs, context);
+    }
+
 }

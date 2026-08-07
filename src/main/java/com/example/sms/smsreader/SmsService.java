@@ -9,6 +9,9 @@ import com.example.sms.exception.NonOtpSmsException;
 import com.example.sms.exception.SerialPortException;
 import com.example.sms.exception.ModemTimeoutException;
 
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -36,6 +39,10 @@ import java.util.regex.Pattern;
  *   khỏi SIM để giải phóng bộ nhớ, bất kể cấu hình deleteSmsAfterRead.
  */
 public class SmsService {
+
+    private static final char SMS_CTRL_Z = 0x1A;
+    private static final int SMS_PROMPT_TIMEOUT_MS = 5_000;
+    private static final int SMS_SEND_TIMEOUT_MS = 8_000;
 
     private static final Logger log = LoggerFactory.getLogger(SmsService.class);
 
@@ -77,6 +84,7 @@ public class SmsService {
         } catch (NonOtpSmsException e) {
             // SMS không phải OTP => xóa ngay khỏi SIM để giải phóng bộ nhớ,
             // bất kể cấu hình DELETE_SMS_AFTER_READ.
+            log.info("[NON-OTP SMS] index={} | {}", index, e.getMessage()); // NEW
             log.debug("SMS tại index {} không phải OTP — đang xóa khỏi SIM: {}", index, e.getMessage());
             deleteSms(index);
             return Optional.empty();
@@ -119,6 +127,7 @@ public class SmsService {
                 messages.add(msg);
                 log.debug("Quét định kỳ: đã phân tích SMS tại index {}: {}", index, msg);
             } catch (com.example.sms.exception.NonOtpSmsException e) {
+                log.info("[NON-OTP SMS] index={} | {}", index, e.getMessage()); // NEW
                 log.debug("Quét định kỳ: SMS tại index {} không phải OTP — đang xóa khỏi SIM: {}", index, e.getMessage());
                 deleteSms(index);
             } catch (SerialPortException | ModemTimeoutException e) {
@@ -247,5 +256,38 @@ public class SmsService {
                 deleted, toDelete.size(), total - deleted);
 
         return deleted;
+    }
+
+    /**
+     * Gửi một tin nhắn SMS text tới {@code phoneNumber} với nội dung {@code content}.
+     *
+     * Flow chuẩn (spec AT+CMGS):
+     * 1. AT+CMGF=1     -> chuyển modem sang text mode.
+     * 2. AT+CMGS="số"  -> modem trả về dấu nhắc ">" chờ nội dung.
+     * 3. Ghi nội dung, kết thúc bằng Ctrl+Z (0x1A) để modem gửi đi.
+     *
+     * @throws SerialPortException nếu AT+CMGF=1 thất bại hoặc lỗi I/O.
+     * @throws ModemTimeoutException nếu không nhận được dấu nhắc ">" hoặc
+     *         phản hồi kết thúc đúng hạn.
+     */
+    public String sendSms(String phoneNumber, String content) {
+        return sendSms(phoneNumber, content, SMS_SEND_TIMEOUT_MS);
+    }
+
+    public String sendSms(String phoneNumber, String content, int timeoutMs) {
+        String modeResult = atClient.sendAndWait("AT+CMGF=1", timeoutMs);
+        if (!modeResult.contains("OK")) {
+            throw new SerialPortException(
+                    "Không thể chuyển modem sang text mode (AT+CMGF=1). Response: " + modeResult);
+        }
+
+        atClient.drainStale();
+        atClient.sendRaw("AT+CMGS=\"" + phoneNumber + "\"");
+        atClient.waitForToken(">", SMS_PROMPT_TIMEOUT_MS, "AT+CMGS chờ dấu nhắc gửi nội dung SMS");
+
+        byte[] payload = (content + SMS_CTRL_Z).getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        atClient.writeRawBytes(payload);
+
+        return atClient.readTerminatedResponse(timeoutMs, "AT+CMGS (nội dung SMS tới " + phoneNumber + ")");
     }
 }

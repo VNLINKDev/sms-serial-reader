@@ -1,6 +1,7 @@
 package com.example.sms;
 
 import com.example.sms.config.AppConfig;
+import com.example.sms.schedule.PublishSmsSchedule;
 import com.example.sms.serial.SerialPortManager;
 import com.example.sms.serial.AtCommandClient;
 import com.example.sms.modem.ModemInitializer;
@@ -46,11 +47,16 @@ public class SmsReaderApplication {
 
         // 3. Khởi tạo AT Command Client (đọc/ghi trực tiếp serial port)
         AtCommandClient atClient = new AtCommandClient(portManager);
+        Object modemLock = new Object(); // dùng chung để đồng bộ truy cập atClient giữa các thread
         ModemInitializer modemInitializer = new ModemInitializer(atClient);
 
         // 4. Khởi tạo Service xử lý nghiệp vụ SMS
         SmsParser smsParser = new SmsParser(config.getSmsOtpPattern());
         SmsService smsService = new SmsService(atClient, smsParser, config);
+
+        System.out.println("Tạo lịch trình bắn sms mỗi 5 ngày với SĐT: " + config.getPhoneNumber());
+        PublishSmsSchedule smsSchedule = new PublishSmsSchedule(config, smsService, modemLock);
+        smsSchedule.start();
 
         // 5. Khởi tạo Redis integration
         RedisPublisher redisPublisher = new RedisPublisher(config);
@@ -83,7 +89,7 @@ public class SmsReaderApplication {
             System.out.println("JVM đã kích hoạt hook tắt ứng dụng. Đang tắt an toàn...");
             System.out.println("==================================================");
 
-            shutdownGracefully(runtime, redisPublisher, shutdownStarted);
+            shutdownGracefully(runtime, smsSchedule, redisPublisher, shutdownStarted);
             shutdownLatch.countDown();
         }, "sms-reader-shutdown-hook"));
 
@@ -91,7 +97,7 @@ public class SmsReaderApplication {
             runtime.run();
         } catch (Exception e) {
             System.err.println("NGHIÊM TRỌNG: Bộ chạy đọc SMS khởi chạy thất bại: " + e.getMessage());
-            shutdownGracefully(runtime, redisPublisher, shutdownStarted);
+            shutdownGracefully(runtime, smsSchedule, redisPublisher, shutdownStarted);
             System.exit(1);
         }
 
@@ -99,13 +105,14 @@ public class SmsReaderApplication {
             shutdownLatch.await();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            shutdownGracefully(runtime, redisPublisher, shutdownStarted);
+            shutdownGracefully(runtime, smsSchedule, redisPublisher, shutdownStarted);
             System.exit(1);
         }
     }
 
     private static void shutdownGracefully(
             SmsReaderRuntime runtime,
+            PublishSmsSchedule smsSchedule,
             RedisPublisher redisPublisher,
             AtomicBoolean shutdownStarted) {
         if (!shutdownStarted.compareAndSet(false, true)) {
@@ -118,6 +125,7 @@ public class SmsReaderApplication {
             System.err.println("Lỗi khi tắt runtime: " + e.getMessage());
         }
 
+        closeQuietly(smsSchedule, "lịch gửi SMS định kỳ");
         closeQuietly(redisPublisher, "bộ phát Redis");
         System.out.println("Đã tắt ứng dụng hoàn tất. Tạm biệt!");
     }
