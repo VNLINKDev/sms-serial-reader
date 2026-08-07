@@ -10,9 +10,6 @@ import java.util.concurrent.TimeUnit;
 
 @Slf4j
 public class PublishSmsSchedule implements AutoCloseable {
-
-    private static final long PERIOD_DAYS = 5;
-
     private final AppConfig config;
     private final SmsService smsService;   // đổi từ AtCommandClient -> SmsService
     private final Object modemLock;
@@ -30,14 +27,16 @@ public class PublishSmsSchedule implements AutoCloseable {
     }
 
     public void start() {
-        log.info("Khởi tạo lịch gửi SMS mỗi {} ngày. phoneNumber={}", PERIOD_DAYS, config.getPhoneNumber());
+        int keepAliveDays = config.getKeepAliveSmsIntervalDays();
+        log.info("Khởi tạo lịch gửi SMS mỗi {} ngày. phoneNumber={}", keepAliveDays, config.getPhoneNumber());
 
-        scheduler.scheduleWithFixedDelay(this::execute, 0, PERIOD_DAYS, TimeUnit.DAYS);
+        scheduler.scheduleWithFixedDelay(this::execute, 0, keepAliveDays, TimeUnit.DAYS);
     }
 
     private void execute() {
 
         String phoneNumber = config.getPhoneNumber();
+        String keepAliveMsg = config.getKeepAliveSmsContent();
 
         if (phoneNumber == null || phoneNumber.isBlank()) {
             log.warn("PHONE_NUMBER chưa được cấu hình.");
@@ -49,7 +48,7 @@ public class PublishSmsSchedule implements AutoCloseable {
 
                 log.info("Bắt đầu gửi SMS định kỳ tới {}", phoneNumber);
 
-                sendSms(phoneNumber, "OTP");
+                sendSms(phoneNumber, keepAliveMsg);
 
                 log.info("Đã gửi SMS định kỳ tới {}", phoneNumber);
             }

@@ -30,6 +30,8 @@ public class AppConfig {
             getEnv("REDIS_QUEUE_NAME", "sms:incoming"),
             phoneNumber
     );
+    private final String keepAliveSmsContent = getEnv("KEEP_ALIVE_SMS_CONTENT","OTP");
+    private final Integer keepAliveSmsIntervalDays = getEnvInt("KEEP_ALIVE_SMS_INTERVAL_DAYS",5);
     private final RedisMode redisMode = getEnvEnum("REDIS_MODE", RedisMode.class, RedisMode.VALUE);
     private final int redisPublishRetries = getEnvInt("REDIS_PUBLISH_RETRIES", 3);
     private final long redisTimeoutMs = getEnvLong("REDIS_TIMEOUT_MS", 10000L);
