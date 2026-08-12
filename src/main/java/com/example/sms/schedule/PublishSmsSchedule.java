@@ -27,34 +27,46 @@ public class PublishSmsSchedule implements AutoCloseable {
     }
 
     public void start() {
-        int keepAliveDays = config.getKeepAliveSmsIntervalDays();
-        log.info("Khởi tạo lịch gửi SMS mỗi {} ngày (delay khởi động: 30s). phoneNumber={}", keepAliveDays, config.getPhoneNumber());
+        int keepAliveDays = Math.max(1, config.getKeepAliveSmsIntervalDays());
+        long intervalSeconds = TimeUnit.DAYS.toSeconds(keepAliveDays);
+        long configuredInitialDelay = config.getKeepAliveSmsInitialDelaySeconds();
+        long initialDelaySeconds = configuredInitialDelay >= 0
+                ? configuredInitialDelay
+                : intervalSeconds;
+        log.info("Khởi tạo lịch gửi SMS mỗi {} ngày; lần gửi đầu tiên sau {} giây. phoneNumber={}",
+                keepAliveDays, initialDelaySeconds, config.getPhoneNumber());
 
-        scheduler.scheduleWithFixedDelay(this::execute, 30, keepAliveDays * 86400L, TimeUnit.SECONDS);
+        // Production có thể để initial delay âm (mặc định) để chờ đủ chu kỳ.
+        // Môi trường test có thể cấu hình delay ngắn mà không sửa lại source code.
+        scheduler.scheduleWithFixedDelay(
+                this::execute,
+                initialDelaySeconds,
+                intervalSeconds,
+                TimeUnit.SECONDS);
     }
 
     private void execute() {
 
-        String phoneNumber = config.getPhoneNumber();
+        String keepAlivePhoneNumber = config.getKeepAlivePhoneNumber();
         String keepAliveMsg = config.getKeepAliveSmsContent();
 
-        if (phoneNumber == null || phoneNumber.isBlank()) {
-            log.warn("PHONE_NUMBER chưa được cấu hình.");
+        if (keepAlivePhoneNumber == null || keepAlivePhoneNumber.isBlank()) {
+            log.warn("KEEP_ALIVE_PHONE_NUMBER chưa được cấu hình.");
             return;
         }
 
         try {
             synchronized (modemLock) {
 
-                log.info("Bắt đầu gửi SMS định kỳ tới {}", phoneNumber);
+                log.info("Bắt đầu gửi SMS định kỳ tới {}", keepAlivePhoneNumber);
 
-                var sms = sendSms(phoneNumber, keepAliveMsg);
+                var sms = sendSms(keepAlivePhoneNumber, keepAliveMsg);
 
-                log.info("Đã gửi SMS {} định kỳ tới {}", sms, phoneNumber);
+                log.info("Đã gửi SMS {} định kỳ tới {}", sms, keepAlivePhoneNumber);
             }
 
         } catch (Exception e) {
-            log.error("Gửi SMS định kỳ thất bại. phoneNumber={}, error={}", phoneNumber, e.getMessage(), e);
+            log.error("Gửi SMS định kỳ thất bại. phoneNumber={}, error={}", keepAlivePhoneNumber, e.getMessage(), e);
         }
     }
 
