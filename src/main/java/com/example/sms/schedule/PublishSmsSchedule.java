@@ -34,7 +34,7 @@ public class PublishSmsSchedule implements AutoCloseable {
                 ? configuredInitialDelay
                 : intervalSeconds;
         log.info("Khởi tạo lịch gửi SMS mỗi {} ngày; lần gửi đầu tiên sau {} giây. phoneNumber={}",
-                keepAliveDays, initialDelaySeconds, config.getPhoneNumber());
+                keepAliveDays, initialDelaySeconds, config.getKeepAlivePhoneNumber());
 
         // Production có thể để initial delay âm (mặc định) để chờ đủ chu kỳ.
         // Môi trường test có thể cấu hình delay ngắn mà không sửa lại source code.
