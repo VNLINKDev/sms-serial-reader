@@ -81,8 +81,6 @@ public class SmsReaderApplication {
         CountDownLatch shutdownLatch = new CountDownLatch(1);
         AtomicBoolean shutdownStarted = new AtomicBoolean(false);
 
-        smsSchedule.start();
-
         // 8. Đăng ký JVM Shutdown Hook trước khi runtime start để mọi failure sau
         // điểm này đều đi qua cùng một đường cleanup.
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -101,6 +99,7 @@ public class SmsReaderApplication {
             shutdownGracefully(runtime, smsSchedule, redisPublisher, shutdownStarted);
             System.exit(1);
         }
+        smsSchedule.start();
 
         try {
             shutdownLatch.await();
