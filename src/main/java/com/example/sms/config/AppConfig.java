@@ -32,6 +32,12 @@ public class AppConfig {
     );
     private final String keepAliveSmsContent = getEnv("KEEP_ALIVE_SMS_CONTENT","OTP");
     private final Integer keepAliveSmsIntervalDays = getEnvInt("KEEP_ALIVE_SMS_INTERVAL_DAYS",5);
+    private final String keepAlivePhoneNumber = getEnv("KEEP_ALIVE_PHONE_NUMBER",null);
+    /**
+     * Delay trước lần gửi keep-alive đầu tiên. Giá trị âm nghĩa là dùng đúng
+     * KEEP_ALIVE_SMS_INTERVAL_DAYS; đặt 30 trong môi trường test để thử sau 30 giây.
+     */
+    private final long keepAliveSmsInitialDelaySeconds = getEnvLong("KEEP_ALIVE_SMS_INITIAL_DELAY_SECONDS", -1L);
     private final RedisMode redisMode = getEnvEnum("REDIS_MODE", RedisMode.class, RedisMode.VALUE);
     private final int redisPublishRetries = getEnvInt("REDIS_PUBLISH_RETRIES", 3);
     private final long redisTimeoutMs = getEnvLong("REDIS_TIMEOUT_MS", 10000L);
@@ -94,6 +100,9 @@ public class AppConfig {
         log.info("REDIS_LATEST_KEY: {}", redisLatestKey);
         log.info("DELETE_SMS_AFTER_READ: {}", deleteSmsAfterRead);
         log.info("UNREAD_POLL_INTERVAL_MS: {}", unreadPollIntervalMs);
+        log.info("KEEP_ALIVE_SMS_INTERVAL_DAYS: {}", keepAliveSmsIntervalDays);
+        log.info("KEEP_ALIVE_SMS_INITIAL_DELAY_SECONDS: {}", keepAliveSmsInitialDelaySeconds);
+        log.info("KEEP_ALIVE_PHONE_NUMBER {}",keepAlivePhoneNumber);
         log.info("SIM_HIGH_WATERMARK: {}", simHighWatermark);
         log.info("SIM_KEEP_RECENT: {}", simKeepRecent);
         log.info("TELEGRAM_ENABLED: {}", telegramEnabled);
