@@ -28,9 +28,9 @@ public class PublishSmsSchedule implements AutoCloseable {
 
     public void start() {
         int keepAliveDays = config.getKeepAliveSmsIntervalDays();
-        log.info("Khởi tạo lịch gửi SMS mỗi {} ngày. phoneNumber={}", keepAliveDays, config.getPhoneNumber());
+        log.info("Khởi tạo lịch gửi SMS mỗi {} ngày (delay khởi động: 30s). phoneNumber={}", keepAliveDays, config.getPhoneNumber());
 
-        scheduler.scheduleWithFixedDelay(this::execute, 0, keepAliveDays, TimeUnit.DAYS);
+        scheduler.scheduleWithFixedDelay(this::execute, 30, keepAliveDays * 86400L, TimeUnit.SECONDS);
     }
 
     private void execute() {

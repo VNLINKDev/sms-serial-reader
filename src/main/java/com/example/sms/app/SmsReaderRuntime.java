@@ -33,7 +33,6 @@ import io.reactivex.rxjava3.schedulers.Schedulers;
 import io.reactivex.rxjava3.subjects.PublishSubject;
 import io.reactivex.rxjava3.subjects.Subject;
 
-@RequiredArgsConstructor
 public class SmsReaderRuntime {
 
     private static final Logger log = LoggerFactory.getLogger(SmsReaderRuntime.class);
@@ -60,7 +59,34 @@ public class SmsReaderRuntime {
 
     private final CompositeDisposable disposables = new CompositeDisposable();
     private final Subject<ScanResult> scanResults = PublishSubject.<ScanResult>create().toSerialized();
-    private final Object modemLock = new Object();
+    private final Object modemLock;
+
+    public SmsReaderRuntime(
+            SerialPortManager portManager,
+            ModemInitializer modemInitializer,
+            SmsService smsService,
+            RedisPublisher redisPublisher,
+            TelegramNotifier telegramNotifier,
+            AppConfig appConfig) {
+        this(portManager, modemInitializer, smsService, redisPublisher, telegramNotifier, appConfig, new Object());
+    }
+
+    public SmsReaderRuntime(
+            SerialPortManager portManager,
+            ModemInitializer modemInitializer,
+            SmsService smsService,
+            RedisPublisher redisPublisher,
+            TelegramNotifier telegramNotifier,
+            AppConfig appConfig,
+            Object modemLock) {
+        this.portManager = portManager;
+        this.modemInitializer = modemInitializer;
+        this.smsService = smsService;
+        this.redisPublisher = redisPublisher;
+        this.telegramNotifier = telegramNotifier;
+        this.appConfig = appConfig;
+        this.modemLock = modemLock != null ? modemLock : new Object();
+    }
 
     private static final long INITIAL_MODEM_RECONNECT_BACKOFF_MS = 5_000L;
     private static final long MAX_MODEM_RECONNECT_BACKOFF_MS = 60_000L;

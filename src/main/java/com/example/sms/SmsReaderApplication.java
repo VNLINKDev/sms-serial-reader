@@ -56,7 +56,6 @@ public class SmsReaderApplication {
 
         System.out.println("Tạo lịch trình bắn sms mỗi 5 ngày với SĐT: " + config.getPhoneNumber());
         PublishSmsSchedule smsSchedule = new PublishSmsSchedule(config, smsService, modemLock);
-        smsSchedule.start();
 
         // 5. Khởi tạo Redis integration
         RedisPublisher redisPublisher = new RedisPublisher(config);
@@ -77,10 +76,12 @@ public class SmsReaderApplication {
         // 7. Khởi chạy Core Runtime
         SmsReaderRuntime runtime = new SmsReaderRuntime(
                 portManager, modemInitializer,
-                smsService, redisPublisher, telegramNotifier, config);
+                smsService, redisPublisher, telegramNotifier, config, modemLock);
 
         CountDownLatch shutdownLatch = new CountDownLatch(1);
         AtomicBoolean shutdownStarted = new AtomicBoolean(false);
+
+        smsSchedule.start();
 
         // 8. Đăng ký JVM Shutdown Hook trước khi runtime start để mọi failure sau
         // điểm này đều đi qua cùng một đường cleanup.
