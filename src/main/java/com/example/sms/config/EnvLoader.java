@@ -63,6 +63,18 @@ public final class EnvLoader {
         }
 
         if (value != null) {
+            value = value.trim();
+
+            // File .env thường đặt regex/chuỗi trong dấu nháy. Dấu nháy chỉ dùng
+            // để bao giá trị, không phải một phần của giá trị cấu hình.
+            if (value.length() >= 2) {
+                char first = value.charAt(0);
+                char last = value.charAt(value.length() - 1);
+                if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+                    value = value.substring(1, value.length() - 1);
+                }
+            }
+
             // Unescape double backslashes (\\) to single backslashes (\)
             value = value.replace("\\\\", "\\");
         }
