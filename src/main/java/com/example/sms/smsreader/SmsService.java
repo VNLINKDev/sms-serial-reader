@@ -42,7 +42,7 @@ public class SmsService {
 
     private static final char SMS_CTRL_Z = 0x1A;
     private static final int SMS_PROMPT_TIMEOUT_MS = 5_000;
-    private static final int SMS_SEND_TIMEOUT_MS = 8_000;
+    private static final int SMS_SEND_TIMEOUT_MS = 30_000;
 
     private static final Logger log = LoggerFactory.getLogger(SmsService.class);
 
@@ -275,19 +275,44 @@ public class SmsService {
     }
 
     public String sendSms(String phoneNumber, String content, int timeoutMs) {
+        if (phoneNumber == null || phoneNumber.isBlank()) {
+            throw new IllegalArgumentException("Số điện thoại gửi SMS không được để trống.");
+        }
+        if (content == null || content.isEmpty()) {
+            throw new IllegalArgumentException("Nội dung SMS không được để trống.");
+        }
+
+        // Chuyển modem sang chế độ SMS text.
         String modeResult = atClient.sendAndWait("AT+CMGF=1", timeoutMs);
-        if (!modeResult.contains("OK")) {
+        if (containsError(modeResult) || !modeResult.contains("OK")) {
             throw new SerialPortException(
                     "Không thể chuyển modem sang text mode (AT+CMGF=1). Response: " + modeResult);
         }
 
+        // Bắt đầu phiên gửi và chờ modem cho phép nhập nội dung.
         atClient.drainStale();
-        atClient.sendRaw("AT+CMGS=\"" + phoneNumber + "\"");
+        atClient.sendRaw("AT+CMGS=\"" + phoneNumber.trim() + "\"");
         atClient.waitForToken(">", SMS_PROMPT_TIMEOUT_MS, "AT+CMGS chờ dấu nhắc gửi nội dung SMS");
 
-        byte[] payload = (content + SMS_CTRL_Z).getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        // Ctrl+Z kết thúc nội dung và yêu cầu modem gửi tin.
+        byte[] payload = (content + SMS_CTRL_Z).getBytes(StandardCharsets.US_ASCII);
         atClient.writeRawBytes(payload);
 
-        return atClient.readTerminatedResponse(timeoutMs, "AT+CMGS (nội dung SMS tới " + phoneNumber + ")");
+        // Chờ modem trả kết quả cuối cùng.
+        String response = atClient.readTerminatedResponse(timeoutMs,
+                "AT+CMGS (nội dung SMS tới " + phoneNumber + ")");
+
+        // Thành công phải có message reference (+CMGS), OK và không chứa lỗi.
+        if (!response.contains("+CMGS:") || !response.contains("OK") || containsError(response)) {
+            throw new SerialPortException("Modem báo lỗi gửi SMS (" + phoneNumber + "): " + response.trim());
+        }
+        return response;
+    }
+
+    private static boolean containsError(String response) {
+        return response == null
+                || response.contains("ERROR")
+                || response.contains("+CME ERROR")
+                || response.contains("+CMS ERROR");
     }
 }

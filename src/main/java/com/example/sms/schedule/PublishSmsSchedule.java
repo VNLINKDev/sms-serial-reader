@@ -48,9 +48,9 @@ public class PublishSmsSchedule implements AutoCloseable {
 
                 log.info("Bắt đầu gửi SMS định kỳ tới {}", phoneNumber);
 
-                sendSms(phoneNumber, keepAliveMsg);
+                var sms = sendSms(phoneNumber, keepAliveMsg);
 
-                log.info("Đã gửi SMS định kỳ tới {}", phoneNumber);
+                log.info("Đã gửi SMS {} định kỳ tới {}", sms, phoneNumber);
             }
 
         } catch (Exception e) {
@@ -58,8 +58,8 @@ public class PublishSmsSchedule implements AutoCloseable {
         }
     }
 
-    private void sendSms(String phoneNumber, String content) {
-        smsService.sendSms(phoneNumber, content);
+    private String sendSms(String phoneNumber, String content) {
+        return smsService.sendSms(phoneNumber, content);
     }
 
     @Override
