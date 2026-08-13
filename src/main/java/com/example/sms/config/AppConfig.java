@@ -32,7 +32,7 @@ public class AppConfig {
     );
     private final String keepAliveSmsContent = getEnv("KEEP_ALIVE_SMS_CONTENT","OTP");
     private final Integer keepAliveSmsIntervalDays = getEnvInt("KEEP_ALIVE_SMS_INTERVAL_DAYS",5);
-    private final String keepAlivePhoneNumber = getEnv("KEEP_ALIVE_PHONE_NUMBER",null);
+    private final String keepAlivePhoneNumber = getEnv("KEEP_ALIVE_PHONE_NUMBER",phoneNumber);
     /**
      * Delay trước lần gửi keep-alive đầu tiên. Giá trị âm nghĩa là dùng đúng
      * KEEP_ALIVE_SMS_INTERVAL_DAYS; đặt 30 trong môi trường test để thử sau 30 giây.

@@ -103,6 +103,7 @@ public class TelegramNotifier {
                 : "N/A";
 
         return "🔔 <b>OTP Nhận Được</b>\n\n"
+                + "☎\uFE0F <b>Số điện thoại:</b> <code>" + escapeHtml(config.getPhoneNumber()) + "</code>\n"
                 + "🔑 <b>Mã giao dịch:</b> <code>" + escapeHtml(msg.getTransactionId()) + "</code>\n"
                 + "🔐 <b>OTP:</b> <code>" + escapeHtml(msg.getOtp()) + "</code>\n"
                 + "🕐 <b>Thời gian:</b> " + escapeHtml(timestamp);
