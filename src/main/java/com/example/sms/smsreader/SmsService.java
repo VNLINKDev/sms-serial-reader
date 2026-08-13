@@ -70,11 +70,14 @@ public class SmsService {
      */
     public Optional<SmsMessage> readAndParse(int index) {
         log.debug("Đang đọc SMS tại index {}...", index);
+        log.info("Đang đọc SMS tại index {}...", index);
         try {
             String response = atClient.sendAndWait("AT+CMGR=" + index);
             log.debug("Phản hồi thô cho index {}: {}", index, response);
+            log.info("Phản hồi thô cho index {}: {}", index, response);;
             SmsMessage msg  = smsParser.parse(index, response);
             log.debug("Đã phân tích SMS tại index {}: {}", index, msg);
+            log.info("Đã phân tích SMS tại index {}: {}", index, msg);
             if (config.isDeleteSmsAfterRead()) {
                 deleteSms(index);
             }
@@ -118,14 +121,16 @@ public class SmsService {
     public List<SmsMessage> readAndParseAll() {
         List<Integer> indexes = listAllIndexes();
         log.debug("Quét định kỳ: tìm thấy {} SMS trên SIM, indexes: {}", indexes.size(), indexes);
-
+        log.info("Quét định kỳ: tìm thấy {} SMS trên SIM, indexes: {}", indexes.size(), indexes);
         List<SmsMessage> messages = new ArrayList<>();
         for (int index : indexes) {
             try {
                 String response = atClient.sendAndWait("AT+CMGR=" + index);
+                log.info("Phản hồi thô cho index {}: {}", index, response);;
                 SmsMessage msg = smsParser.parse(index, response);
                 messages.add(msg);
                 log.debug("Quét định kỳ: đã phân tích SMS tại index {}: {}", index, msg);
+                log.info("Quét định kỳ: đã phân tích SMS tại index {}: {}", index, msg);
             } catch (com.example.sms.exception.NonOtpSmsException e) {
                 log.info("[NON-OTP SMS] index={} | {}", index, e.getMessage()); // NEW
                 log.debug("Quét định kỳ: SMS tại index {} không phải OTP — đang xóa khỏi SIM: {}", index, e.getMessage());
@@ -134,6 +139,7 @@ public class SmsService {
                 throw e;
             } catch (Exception e) {
                 log.warn("Quét định kỳ: không thể đọc/phân tích SMS tại index {}: {}", index, e.getMessage());
+                log.info("Quét định kỳ: không thể đọc/phân tích SMS tại index {}: {}", index, e.getMessage());
             }
         }
 
