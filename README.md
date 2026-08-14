@@ -154,35 +154,30 @@ Sau khi đã hoàn thiện file cấu hình `.env` ở thư mục gốc:
 java -jar target/sms-serial-reader-1.0.0.jar
 ```
 
-### 3. Vận Hành Trên Môi Trường Production (Linux Daemon)
+### 3. Vận hành hai SIM bằng Docker Compose
 
-Hệ thống cung cấp sẵn các script bash hỗ trợ quản lý ứng dụng chạy ngầm (background process) bằng PID và `nohup`:
+Hai service `sim01` và `sim02` dùng chung image nhưng nạp cấu hình riêng từ
+`env/.envsim01` và `env/.envsim02`. Mỗi service chỉ được map đúng serial device
+của SIM tương ứng.
 
-*   **Khởi động dịch vụ:**
-    ```bash
-    ./start.sh
-    ```
-    *Script sẽ tự động chuẩn hóa định dạng dòng (CRLF to LF) của `.env`, nạp cấu hình, khởi chạy app chạy ngầm, ghi file `app.pid` và theo dõi log khởi động trong 5 giây đầu để phát hiện sự cố.*
+```bash
+# Điều khiển riêng SIM 01
+./start.sh sim01
+./stop.sh sim01
+./restart.sh sim01
 
-*   **Dừng dịch vụ:**
-    ```bash
-    ./stop.sh
-    ```
-    *Dịch vụ sẽ gửi tín hiệu `SIGTERM` đến ứng dụng và chờ tối đa 15 giây để ứng dụng giải phóng cổng Serial và kết nối Redis một cách an toàn (Graceful Shutdown). Nếu quá thời gian, script sẽ gửi lệnh `SIGKILL` để buộc dừng.*
+# Điều khiển riêng SIM 02
+./start.sh sim02
+./stop.sh sim02
+./restart.sh sim02
+```
 
-*   **Khởi động lại dịch vụ:**
-    ```bash
-    ./restart.sh
-    ```
+Xem log container của từng SIM:
 
-*   **Xem log ứng dụng:**
-    ```bash
-    # Xem log hoạt động chính của ứng dụng
-    tail -f logs/sms-reader.log
-    
-    # Xem log khởi động console/stderr
-    tail -f logs/app.log
-    ```
+```bash
+docker compose logs -f sim01
+docker compose logs -f sim02
+```
 
 ---
 
@@ -230,4 +225,3 @@ mvn test
 4. Commit các thay đổi (`git commit -m 'Add some AmazingFeature'`).
 5. Đẩy nhánh lên remote repository (`git push origin feature/AmazingFeature`).
 6. Tạo một Pull Request để kiểm duyệt.
-
