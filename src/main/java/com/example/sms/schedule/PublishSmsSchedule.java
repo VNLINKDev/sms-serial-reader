@@ -48,6 +48,11 @@ public class PublishSmsSchedule implements AutoCloseable {
     private void execute() {
 
         String keepAlivePhoneNumber = config.getKeepAlivePhoneNumber();
+
+        if (keepAlivePhoneNumber != null && keepAlivePhoneNumber.startsWith("84")) {
+            keepAlivePhoneNumber = "0" + keepAlivePhoneNumber.substring(2);
+        }
+
         String keepAliveMsg = config.getKeepAliveSmsContent();
 
         if (keepAlivePhoneNumber == null || keepAlivePhoneNumber.isBlank()) {
