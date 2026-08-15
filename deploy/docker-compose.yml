@@ -17,7 +17,7 @@ services:
   sim01:
     <<: *sms-reader
     env_file:
-      - ./env/.envsim01
+      - ./env/.envsim84832019510
     environment:
       SERIAL_PORT: /dev/modem
     devices:
@@ -28,7 +28,7 @@ services:
   sim02:
     <<: *sms-reader
     env_file:
-      - ./env/.envsim02
+      - ./env/.envsim84812943652
     environment:
       SERIAL_PORT: /dev/modem
     devices:

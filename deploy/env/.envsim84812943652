@@ -1,27 +1,18 @@
-# Thông tin của application 
-APP_NAME=sms-otp-84832019510
-APP_IMAGE=sms-otp
-APP_VERSION=2.0.0
-SPRING_PROFILES_ACTIVE=prod
-SERVER_PORT=63010
-JAVA_OPTS=--Xms64m -Xmx256m
+# JVM
+JAVA_OPTS=-Xms64m -Xmx256m
 
-# Đường dẫn thiết bị cổng serial
-# Giá trị thường dùng: /dev/ttyUSB0, /dev/ttyUSB1, /dev/ttyACM0.
-SERIAL_DEVICE=/dev/ttyUSB0
-SERIAL_PORT=/dev/ttyUSB0
+# Modem và SIM
+# SERIAL_PORT do Docker Compose map thành /dev/modem.
 BAUD_RATE=115200
+PHONE_NUMBER=84812943652
 
-# SỐ điện thoại của SIM trong modem GSM. Số này sẽ được dùng để nhận SMS OTP.
-PHONE_NUMBER=84832019510
-
-# Thông tin SMS tự động gửi đi để giữ số không bị nhà mạng khóa
-KEEP_ALIVE_SMS_CONTENT=OTP gui tu dong giu so 84832019510 keep alive
-KEEP_ALIVE_PHONE_NUMBER=84812943652
+# SMS keep-alive
+KEEP_ALIVE_SMS_CONTENT=OTP gui tu dong giu so 84812943652 keep alive
+KEEP_ALIVE_PHONE_NUMBER=84832019510
 KEEP_ALIVE_SMS_INTERVAL_DAYS=5
 KEEP_ALIVE_SMS_INITIAL_DELAY_SECONDS=100
 
-# Thông tin Redis 
+# Redis
 REDIS_HOST=10.10.10.11
 REDIS_PORT=7841
 REDIS_PASSWORD=bPTrVjRIbLst9af1n8xsUrAON4mrha
@@ -32,7 +23,7 @@ REDIS_MODE=LIST
 REDIS_PUBLISH_RETRIES=2
 REDIS_TIMEOUT_MS=5000
 
-# Cấu hình có delete SMS sau khi đọc tin hay không
+# Đọc và dọn dẹp SMS
 DELETE_SMS_AFTER_READ=false
 # Thời gian chờ giữa các lần poll SMS chưa đọc
 UNREAD_POLL_INTERVAL_MS=1000
@@ -45,23 +36,14 @@ SMS_INDEX_CMGL_PATTERN=\\+CMGL:\\s*(\\d+),
 # Thông tin pattern SMS OTP để parse OTP từ nội dung SMS
 SMS_OTP_PATTERN=Ma\\s+giao\\s+dich\\s+(\\d+).*?OTP\\s*:?\\s*(\\d+)
 
-# Thông tin cấu hình Telegram
+# Telegram
 TELEGRAM_ENABLED=true
 TELEGRAM_BOT_TOKEN=8078782857:AAHYVoiitYfo1wKRzozfrFlk4YgrAKj4mXM
 TELEGRAM_CHAT_ID=-1004269007353
 
-# Thông tin cấu hình log và health check
-MANAGEMENT_ENDPOINTS=health,info,prometheus
-MANAGEMENT_HEALTH_SHOW_DETAILS=when_authorized
+# Logging
 LOG_PATH=/app/logs
 LOG_LEVEL=INFO
 LOG_MAX_FILE_SIZE=50MB
 LOG_MAX_HISTORY=14
 LOG_TOTAL_SIZE_CAP=2GB
-
-# Thông tin cấu hình backup
-BACKUP_DIR=./backups
-NGINX_SERVER_NAME=_
-TLS_CERT_PATH=/etc/nginx/certs/fullchain.pem
-TLS_KEY_PATH=/etc/nginx/certs/privkey.pem
-

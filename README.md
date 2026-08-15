@@ -98,9 +98,11 @@ Dưới đây là cấu trúc các file mã nguồn chính và vai trò của ch
 sms-serial-reader/
 ├── .env.example                 # File mẫu khai báo các biến môi trường
 ├── pom.xml                      # Cấu hình Maven dependencies và plugins
-├── start.sh                     # Script Bash khởi động app chạy ngầm (Linux)
-├── stop.sh                      # Script Bash tắt app an toàn (Linux)
-├── restart.sh                   # Script Bash khởi động lại nhanh app (Linux)
+├── deploy/
+│   ├── manage-multi-sim.sh      # Quản lý nhiều SIM trên cùng host
+│   ├── manage-single-sim.sh     # Quản lý một SIM trên host riêng
+│   ├── docker-compose.yml       # Compose cho nhiều SIM
+│   └── docker-compose.single.yml # Compose cho một SIM
 ├── src/
 │   ├── main/
 │   │   ├── java/com/example/sms/
@@ -154,30 +156,42 @@ Sau khi đã hoàn thiện file cấu hình `.env` ở thư mục gốc:
 java -jar target/sms-serial-reader-1.0.0.jar
 ```
 
-### 3. Vận hành hai SIM bằng Docker Compose
+### 3. Vận hành nhiều SIM trên cùng một host
 
-Hai service `sim01` và `sim02` dùng chung image nhưng nạp cấu hình riêng từ
-`env/.envsim01` và `env/.envsim02`. Mỗi service chỉ được map đúng serial device
-của SIM tương ứng.
-
-```bash
-# Điều khiển riêng SIM 01
-./start.sh sim01
-./stop.sh sim01
-./restart.sh sim01
-
-# Điều khiển riêng SIM 02
-./start.sh sim02
-./stop.sh sim02
-./restart.sh sim02
-```
-
-Xem log container của từng SIM:
+Hai service `sim01` và `sim02` dùng chung image nhưng nạp file cấu hình riêng.
+Mỗi service được map đúng serial device của SIM tương ứng.
 
 ```bash
-docker compose logs -f sim01
-docker compose logs -f sim02
+# Xem đầy đủ lệnh và ví dụ
+./manage-multi-sim.sh --help
+
+# Khởi động tất cả hoặc restart riêng một SIM
+./manage-multi-sim.sh start all
+./manage-multi-sim.sh restart sim01
+
+# Xem trạng thái và log
+./manage-multi-sim.sh status
+./manage-multi-sim.sh logs sim02
 ```
+
+### 4. Vận hành một SIM trên mỗi host riêng
+
+Lệnh `start` bắt buộc chọn file env. USB serial mặc định là `/dev/ttyUSB0`;
+có thể chọn device và thư mục log khác cho từng host:
+
+```bash
+./manage-single-sim.sh --help
+./manage-single-sim.sh \
+  --env-file ./env/.envsim84812943652 \
+  --device /dev/ttyUSB0 \
+  start
+
+# Các lần restart sau giữ nguyên cấu hình của container hiện có
+./manage-single-sim.sh restart
+```
+
+USB serial trên host được map thành alias cố định `/dev/modem` trong container;
+ứng dụng không cần biết device thật là `/dev/ttyUSB0` hay `/dev/ttyUSB1`.
 
 ---
 

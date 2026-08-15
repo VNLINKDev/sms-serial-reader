@@ -1,0 +1,24 @@
+name: sms-serial-reader-single
+
+services:
+  sms-reader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sms-serial-reader:2.0.0
+    restart: unless-stopped
+    stop_grace_period: 20s
+    env_file:
+      - ${SINGLE_SIM_ENV_FILE:-./env/.envsim84832019510}
+    environment:
+      SERIAL_PORT: /dev/modem
+    devices:
+      - "${SINGLE_SIM_DEVICE:-/dev/ttyUSB0}:/dev/modem:rwm"
+    volumes:
+      - ${SINGLE_SIM_LOG_DIR:-./logs/single}:/app/logs
+    logging:
+      driver: local
+      options:
+        max-size: 20m
+        max-file: "5"
+
