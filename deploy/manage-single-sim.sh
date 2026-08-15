@@ -22,6 +22,7 @@ Lệnh:
   help      Hiển thị trợ giúp
 
 Tùy chọn:
+  --engine <engine>   auto, docker hoặc podman (mặc định: auto)
   --env-file <file>   File cấu hình SIM; bắt buộc khi chạy lệnh start
   --device <device>   USB serial trên host
                       Mặc định: /dev/ttyUSB0
@@ -34,6 +35,7 @@ Trong container, device luôn được map thành /dev/modem.
 
 Ví dụ:
   ./manage-single-sim.sh --env-file ./env/.envsim84832019510 start
+  ./manage-single-sim.sh --engine podman --env-file ./env/.envsim84832019510 start
   ./manage-single-sim.sh --env-file ./env/.envsim84812943652 start
   ./manage-single-sim.sh restart
   ./manage-single-sim.sh stop
@@ -45,6 +47,68 @@ EOF
 fail() {
     echo "[ERROR] $*" >&2
     exit 1
+}
+
+select_engine() {
+    case "$engine_choice" in
+        auto)
+            if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+                engine="docker"
+            elif command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then
+                engine="podman"
+            else
+                fail "Không tìm thấy Docker Compose hoặc Podman Compose khả dụng."
+            fi
+            ;;
+        docker)
+            command -v docker >/dev/null 2>&1 || fail "Không tìm thấy lệnh docker."
+            docker compose version >/dev/null 2>&1 || fail "Docker Compose plugin chưa sẵn sàng."
+            engine="docker"
+            ;;
+        podman)
+            command -v podman >/dev/null 2>&1 || fail "Không tìm thấy lệnh podman."
+            podman compose version >/dev/null 2>&1 ||
+                fail "Podman Compose chưa sẵn sàng. Hãy cài podman-compose hoặc docker-compose làm Compose provider."
+            engine="podman"
+            ;;
+        *) fail "Container engine không hợp lệ: $engine_choice. Chỉ chấp nhận auto, docker hoặc podman." ;;
+    esac
+}
+
+is_podman_rootless() {
+    [ "$engine" = "podman" ] &&
+        [ "$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null)" = "true" ]
+}
+
+show_podman_permission_hint() {
+    cat >&2 <<'EOF'
+[HƯỚNG DẪN] Podman rootless có thể không được phép truy cập USB serial.
+  - Kiểm tra: ls -l /dev/ttyUSB*
+  - Thêm user vào group sở hữu device (thường là dialout), rồi đăng xuất/đăng nhập lại.
+  - Nếu quyền chỉ đến từ supplementary group, Podman cần keep-groups.
+  - Trên host dùng SELinux, có thể cần bật container_use_devices.
+  - Nếu vẫn lỗi, chạy Podman rootful hoặc xem mục Podman rootless trong README.md.
+EOF
+}
+
+check_podman_device_permission() {
+    local host_device="$1"
+
+    is_podman_rootless || return 0
+    [ -e "$host_device" ] || fail "Không tìm thấy USB serial: $host_device"
+
+    if [ ! -r "$host_device" ] || [ ! -w "$host_device" ]; then
+        echo "[ERROR] Podman rootless không có quyền đọc/ghi $host_device." >&2
+        show_podman_permission_hint
+        return 1
+    fi
+}
+
+run_compose_with_podman_hint() {
+    if ! "${compose[@]}" "$@"; then
+        is_podman_rootless && show_podman_permission_hint
+        return 1
+    fi
 }
 
 read_env_text_value() {
@@ -66,13 +130,15 @@ env_file=""
 device="/dev/ttyUSB0"
 log_dir="./logs/single"
 command_name=""
+engine_choice="auto"
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --env-file|--device|--log-dir)
+        --engine|--env-file|--device|--log-dir)
             option="$1"
             [ "$#" -ge 2 ] || fail "Thiếu giá trị cho $option."
             case "$option" in
+                --engine) engine_choice="$2" ;;
                 --env-file) env_file="$2" ;;
                 --device) device="$2" ;;
                 --log-dir) log_dir="$2" ;;
@@ -110,23 +176,27 @@ case "$command_name" in
         ;;
 esac
 
-command -v docker >/dev/null 2>&1 || fail "Không tìm thấy lệnh docker."
-docker compose version >/dev/null 2>&1 || fail "Docker Compose plugin chưa sẵn sàng."
+select_engine
 
 [ -n "$env_file" ] && export SINGLE_SIM_ENV_FILE="$env_file"
 export SINGLE_SIM_DEVICE="$device"
 export SINGLE_SIM_LOG_DIR="$log_dir"
 
-compose=(docker compose -f "$COMPOSE_FILE")
+container_engine=("$engine")
+compose=("$engine" compose -f "$COMPOSE_FILE")
+
+case "$command_name" in
+    start) check_podman_device_permission "$device" ;;
+esac
 
 if [ "$command_name" = "info" ]; then
     container_id="$("${compose[@]}" ps -q sms-reader)"
     [ -n "$container_id" ] || fail "Container chưa tồn tại. Hãy chạy lệnh start trước."
 
-    container_environment="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container_id")"
+    container_environment="$("${container_engine[@]}" inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container_id")"
     phone_number="$(read_env_text_value "$container_environment" PHONE_NUMBER)"
     keep_alive_phone_number="$(read_env_text_value "$container_environment" KEEP_ALIVE_PHONE_NUMBER)"
-    host_device="$(docker inspect --format '{{range .HostConfig.Devices}}{{if eq .PathInContainer "/dev/modem"}}{{.PathOnHost}}{{end}}{{end}}' "$container_id")"
+    host_device="$("${container_engine[@]}" inspect --format '{{range .HostConfig.Devices}}{{if eq .PathInContainer "/dev/modem"}}{{.PathOnHost}}{{end}}{{end}}' "$container_id")"
     [ -n "$host_device" ] || host_device="(không tìm thấy mapping)"
 
     echo "Nguồn: container hiện có"
@@ -138,9 +208,9 @@ if [ "$command_name" = "info" ]; then
 fi
 
 case "$command_name" in
-    start) "${compose[@]}" up -d --build sms-reader ;;
+    start) run_compose_with_podman_hint up -d --build sms-reader ;;
     stop) "${compose[@]}" stop sms-reader ;;
-    restart) "${compose[@]}" restart sms-reader ;;
+    restart) run_compose_with_podman_hint restart sms-reader ;;
     status) "${compose[@]}" ps sms-reader ;;
     logs) "${compose[@]}" logs -f sms-reader ;;
 esac

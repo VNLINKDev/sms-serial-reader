@@ -197,6 +197,80 @@ có thể chọn device và thư mục log khác cho từng host:
 USB serial trên host được map thành alias cố định `/dev/modem` trong container;
 ứng dụng không cần biết device thật là `/dev/ttyUSB0` hay `/dev/ttyUSB1`.
 
+### 5. Chọn Docker hoặc Podman
+
+Hai manager hỗ trợ `auto`, `docker` và `podman`. Chế độ `auto` ưu tiên Docker
+nếu cả hai engine cùng được cài đặt:
+
+```bash
+# Tự chọn engine
+./manage-multi-sim.sh start all
+
+# Chọn Podman rõ ràng
+./manage-multi-sim.sh --engine podman start all
+./manage-single-sim.sh \
+  --engine podman \
+  --env-file ./env/.envsim84832019510 \
+  start
+
+# Những lệnh sau cũng nên chỉ rõ engine nếu host cài cả Docker và Podman
+./manage-single-sim.sh --engine podman info
+./manage-single-sim.sh --engine podman restart
+./manage-single-sim.sh --engine podman stop
+```
+
+`podman compose` cần một Compose provider bên ngoài. Nếu script báo Podman
+Compose chưa sẵn sàng, hãy cài `podman-compose` hoặc `docker-compose`, sau đó
+kiểm tra:
+
+```bash
+podman compose version
+```
+
+#### Xử lý Podman rootless không có quyền truy cập USB modem
+
+Kiểm tra device và quyền của user đang chạy manager:
+
+```bash
+ls -l /dev/ttyUSB*
+id
+test -r /dev/ttyUSB0 && test -w /dev/ttyUSB0 \
+  && echo "Có quyền đọc/ghi" \
+  || echo "Chưa có quyền đọc/ghi"
+```
+
+Nếu device thuộc group `dialout`, thêm user vào group rồi đăng xuất và đăng
+nhập lại để session nhận group mới:
+
+```bash
+sudo usermod -aG dialout "$USER"
+```
+
+Podman rootless có thể không truyền supplementary group vào container dù user
+trên host đã thuộc `dialout`. Khi gặp `Permission denied`, có hai hướng:
+
+1. Khuyến nghị cho modem production: chạy Podman rootful bằng cùng một user vận
+   hành nhất quán, ví dụ `sudo ./manage-single-sim.sh --engine podman ...`.
+2. Nếu bắt buộc rootless, cấu hình `keep-groups` cho container/Compose provider
+   và kiểm tra lại khả năng hỗ trợ của provider đang cài đặt.
+
+Trên Fedora/RHEL hoặc host bật SELinux, cho phép container dùng device label:
+
+```bash
+sudo setsebool -P container_use_devices true
+```
+
+Sau khi sửa quyền, chạy lại `start`, kiểm tra trạng thái và log:
+
+```bash
+./manage-single-sim.sh --engine podman --env-file ./env/.envsim84832019510 start
+./manage-single-sim.sh --engine podman status
+./manage-single-sim.sh --engine podman logs
+```
+
+Không chạy đồng thời Docker và Podman trên cùng một USB modem. Hai container
+cùng mở serial port có thể làm lẫn AT command và khiến việc đọc SMS không ổn định.
+
 ---
 
 ## 🔌 API & Định Dạng Dữ Liệu Đầu Ra
