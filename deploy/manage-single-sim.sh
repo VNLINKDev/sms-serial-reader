@@ -17,6 +17,7 @@ Lệnh:
   stop      Dừng service, không xóa container
   restart   Khởi động lại container hiện có, giữ nguyên cấu hình lúc start
   status    Hiển thị trạng thái container
+  info      Hiển thị số SIM, port host và số nhận SMS keep-alive
   logs      Theo dõi log; nhấn Ctrl+C để thoát
   help      Hiển thị trợ giúp
 
@@ -36,6 +37,7 @@ Ví dụ:
   ./manage-single-sim.sh --env-file ./env/.envsim84812943652 start
   ./manage-single-sim.sh restart
   ./manage-single-sim.sh stop
+  ./manage-single-sim.sh info
   ./manage-single-sim.sh logs
 EOF
 }
@@ -43,6 +45,21 @@ EOF
 fail() {
     echo "[ERROR] $*" >&2
     exit 1
+}
+
+read_env_text_value() {
+    local env_text="$1"
+    local wanted_key="$2"
+    local key value
+
+    while IFS='=' read -r key value; do
+        if [ "$key" = "$wanted_key" ]; then
+            echo "$value"
+            return 0
+        fi
+    done <<< "$env_text"
+
+    echo "(chưa cấu hình)"
 }
 
 env_file=""
@@ -63,7 +80,7 @@ while [ "$#" -gt 0 ]; do
             shift 2
             ;;
         help|-h|--help) usage; exit 0 ;;
-        start|stop|restart|status|logs)
+        start|stop|restart|status|info|logs)
             [ -z "$command_name" ] || fail "Chỉ được chọn một lệnh."
             command_name="$1"
             shift
@@ -101,6 +118,24 @@ export SINGLE_SIM_DEVICE="$device"
 export SINGLE_SIM_LOG_DIR="$log_dir"
 
 compose=(docker compose -f "$COMPOSE_FILE")
+
+if [ "$command_name" = "info" ]; then
+    container_id="$("${compose[@]}" ps -q sms-reader)"
+    [ -n "$container_id" ] || fail "Container chưa tồn tại. Hãy chạy lệnh start trước."
+
+    container_environment="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container_id")"
+    phone_number="$(read_env_text_value "$container_environment" PHONE_NUMBER)"
+    keep_alive_phone_number="$(read_env_text_value "$container_environment" KEEP_ALIVE_PHONE_NUMBER)"
+    host_device="$(docker inspect --format '{{range .HostConfig.Devices}}{{if eq .PathInContainer "/dev/modem"}}{{.PathOnHost}}{{end}}{{end}}' "$container_id")"
+    [ -n "$host_device" ] || host_device="(không tìm thấy mapping)"
+
+    echo "Nguồn: container hiện có"
+    echo "  PHONE_NUMBER: $phone_number"
+    echo "  Port trên host: $host_device"
+    echo "  Port trong container: /dev/modem"
+    echo "  KEEP_ALIVE_PHONE_NUMBER: $keep_alive_phone_number"
+    exit 0
+fi
 
 case "$command_name" in
     start) "${compose[@]}" up -d --build sms-reader ;;

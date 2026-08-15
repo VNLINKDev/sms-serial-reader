@@ -171,6 +171,7 @@ Mỗi service được map đúng serial device của SIM tương ứng.
 
 # Xem trạng thái và log
 ./manage-multi-sim.sh status
+./manage-multi-sim.sh info all
 ./manage-multi-sim.sh logs sim02
 ```
 
@@ -188,6 +189,9 @@ có thể chọn device và thư mục log khác cho từng host:
 
 # Các lần restart sau giữ nguyên cấu hình của container hiện có
 ./manage-single-sim.sh restart
+
+# Xem thông tin từ container hiện có
+./manage-single-sim.sh info
 ```
 
 USB serial trên host được map thành alias cố định `/dev/modem` trong container;
