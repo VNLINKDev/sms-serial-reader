@@ -46,6 +46,7 @@ public class SmsReaderRuntime {
 
     private volatile String lastRedisTransactionId = null;
     private volatile String lastTelegramTransactionId = null;
+    private volatile String lastLoggedTransactionId = null;
 
     private final ExecutorService scanExecutor = newNamedSingle("sms-serial-scanner");
     private final ExecutorService redisExecutor = newNamedSingle("sms-redis-publisher");
@@ -103,11 +104,11 @@ public class SmsReaderRuntime {
         connectModerm();
         registerSubscribers();
         startScanLoop();
-        log.info("Bộ chạy đọc SMS đã khởi động (chu kỳ quét={}ms).", appConfig.getUnreadPollIntervalMs());
+        log.info("Runtime sẵn sàng | scan={}ms", appConfig.getUnreadPollIntervalMs());
     }
 
     public void connectModerm() throws InterruptedException, ExecutionException, TimeoutException {
-        log.info("Các cổng serial hiện có: {}", SerialPortManager.listAvailablePorts());
+        log.info("Serial ports | {}", SerialPortManager.listAvailablePorts());
         APPLICATION_RUNNING = true;
         scanExecutor.submit(() -> {
             synchronized (modemLock) {
@@ -135,7 +136,6 @@ public class SmsReaderRuntime {
     }
 
     private void registerSubscribers() {
-        log.info("Bộ lắng nghe Redis đã khởi động.");
         disposables.add(scanResults
                 .observeOn(redisScheduler)
                 .concatMap(scanResult -> Observable
@@ -156,14 +156,12 @@ public class SmsReaderRuntime {
                         ignored -> {
                         },
                         e -> log.error("Bộ lắng nghe Redis dừng do lỗi RxJava ngoài dự kiến: {}", e.getMessage(), e)));
-        log.info("Bộ lắng nghe Telegram đã khởi động.");
         disposables.add(scanResults
                 .observeOn(telegramScheduler)
                 .subscribe(
                         this::telegramSend,
                         e -> log.error("Bộ lắng nghe Telegram dừng do lỗi RxJava ngoài dự kiến: {}", e.getMessage(),
                                 e)));
-        log.info("Bộ lắng nghe dọn dẹp SIM đã khởi động.");
         disposables.add(scanResults
                 .map(ScanResult::allMessages)
                 .observeOn(deleteScheduler)
@@ -171,10 +169,10 @@ public class SmsReaderRuntime {
                         this::removeOldSMS,
                         e -> log.error("Bộ lắng nghe dọn dẹp SIM dừng do lỗi RxJava ngoài dự kiến: {}", e.getMessage(),
                                 e)));
+        log.info("Pipeline sẵn sàng | redis | telegram | cleanup");
     }
 
     private void startScanLoop() {
-        log.info("Vòng quét SMS đã khởi động.");
         disposables
                 .add(Observable.interval(0L, appConfig.getUnreadPollIntervalMs(), TimeUnit.MILLISECONDS, scanScheduler)
                         .subscribe(
@@ -212,8 +210,11 @@ public class SmsReaderRuntime {
         SmsMessage latest = allMessages.get(allMessages.size() - 1);
         String latestId = latest.getTransactionId();
 
-        log.info("Quét thấy {} SMS OTP, thông tin SMS mới nhất đã gửi đi: latest.index={} latest.transactionId={} latest.timestamp={}.",
-                allMessages.size(), latest.getIndex(), latestId, latest.getTimestamp());
+        if (!Objects.equals(latestId, lastLoggedTransactionId)) {
+            log.info(">>> SMS MỚI | index={} | tx={} | otp={} | time={} | stored={} <<<",
+                    latest.getIndex(), latestId, maskOtp(latest.getOtp()), latest.getTimestamp(), allMessages.size());
+            lastLoggedTransactionId = latestId;
+        }
 
         scanResults.onNext(new ScanResult(latest, new ArrayList<>(allMessages)));
     }
@@ -230,7 +231,7 @@ public class SmsReaderRuntime {
         }
         redisPublisher.publish(msg);
         lastRedisTransactionId = msg.getTransactionId();
-        log.info("Đã gửi Redis transactionId={} index={}.", msg.getTransactionId(), msg.getIndex());
+        log.info("Redis OK | tx={} | index={}", msg.getTransactionId(), msg.getIndex());
     }
 
     private Function<Observable<Throwable>, Observable<?>> retryRedisWithBackoff(SmsMessage msg) {
@@ -256,6 +257,10 @@ public class SmsReaderRuntime {
         return 1000L << Math.max(0, failedAttempt - 1);
     }
 
+    private static String maskOtp(String otp) {
+        return otp == null || otp.isBlank() ? "-" : "******";
+    }
+
     // ========================================================================
     // TELEGRAM LOOP
     // ========================================================================
@@ -273,7 +278,7 @@ public class SmsReaderRuntime {
             }
             telegramNotifier.sendSync(msg);
             lastTelegramTransactionId = msg.getTransactionId();
-            log.info("Đã gửi thông báo Telegram cho transactionId={} index={}.",
+            log.info("Telegram OK | tx={} | index={}",
                     msg.getTransactionId(), msg.getIndex());
         } catch (Exception e) {
             log.warn("Gửi thông báo Telegram thất bại cho transactionId={} index={}: {}",

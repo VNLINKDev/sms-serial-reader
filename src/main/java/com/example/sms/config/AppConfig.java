@@ -85,34 +85,12 @@ public class AppConfig {
             "Ma\\s+giao\\s+dich\\s+(\\d+).*?OTP\\s*:?\\s*(\\d+)");
 
     public AppConfig() {
-        log.info("=== Cấu hình ứng dụng ===");
-        log.info("HỆ THỐNG ĐÃ ĐƯỢC CẤU HÌNH VỚI SIM SỐ ĐIỆN THOẠI: {}",phoneNumber);
-        log.info("SERIAL_PORT: {}", serialPort);
-        log.info("BAUD_RATE: {}", baudRate);
-        log.info("REDIS_HOST: {}", redisHost);
-        log.info("REDIS_PORT: {}", redisPort);
-        log.info("REDIS_PASSWORD: {}", (redisPassword == null || redisPassword.isBlank()) ? "chưa cấu hình" : "********");
-        log.info("REDIS_DATABASE: {}", redisDatabase);
-        log.info("REDIS_QUEUE_NAME: {}", redisQueueName);
-        log.info("REDIS_MODE: {}", redisMode);
-        log.info("REDIS_PUBLISH_RETRIES: {}", redisPublishRetries);
-        log.info("REDIS_TIMEOUT_MS: {}", redisTimeoutMs);
-        log.info("REDIS_LATEST_KEY: {}", redisLatestKey);
-        log.info("DELETE_SMS_AFTER_READ: {}", deleteSmsAfterRead);
-        log.info("UNREAD_POLL_INTERVAL_MS: {}", unreadPollIntervalMs);
-        log.info("KEEP_ALIVE_SMS_INTERVAL_DAYS: {}", keepAliveSmsIntervalDays);
-        log.info("KEEP_ALIVE_SMS_INITIAL_DELAY_SECONDS: {}", keepAliveSmsInitialDelaySeconds);
-        log.info("KEEP_ALIVE_PHONE_NUMBER {}",keepAlivePhoneNumber);
-        log.info("SIM_HIGH_WATERMARK: {}", simHighWatermark);
-        log.info("SIM_KEEP_RECENT: {}", simKeepRecent);
-        log.info("TELEGRAM_ENABLED: {}", telegramEnabled);
-        log.info("TELEGRAM_BOT_TOKEN: {}",
-                (telegramBotToken == null || telegramBotToken.isBlank()) ? "chưa cấu hình" : "********");
-        log.info("TELEGRAM_CHAT_ID: {}",
-                (telegramChatId == null || telegramChatId.isBlank()) ? "chưa cấu hình" : telegramChatId);
-        log.info("SMS_INDEX_CMGL_PATTERN: {}", smsIndexCmglPattern);
-        log.info("SMS_OTP_PATTERN: {}", smsOtpPattern);
-        log.info("==================================");
+        log.info("Config | sim={} | serial={}@{}", phoneNumber, serialPort, baudRate);
+        log.info("Redis | {}:{}/db{} | mode={} | queue={} | timeout={}ms | retries={}",
+                redisHost, redisPort, redisDatabase, redisMode, redisQueueName, redisTimeoutMs, redisPublishRetries);
+        log.info("Runtime | poll={}ms | delete={} | cleanup={}/{} | telegram={} | keepAlive={}d",
+                unreadPollIntervalMs, deleteSmsAfterRead, simHighWatermark, simKeepRecent,
+                telegramEnabled, keepAliveSmsIntervalDays);
     }
 
     /**

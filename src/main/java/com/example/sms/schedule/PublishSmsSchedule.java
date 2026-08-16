@@ -33,7 +33,7 @@ public class PublishSmsSchedule implements AutoCloseable {
         long initialDelaySeconds = configuredInitialDelay >= 0
                 ? configuredInitialDelay
                 : intervalSeconds;
-        log.info("Khởi tạo lịch gửi SMS mỗi {} ngày; lần gửi đầu tiên sau {} giây. phoneNumber={}",
+        log.info("Keep-alive | every={}d | first={}s | to={}",
                 keepAliveDays, initialDelaySeconds, config.getKeepAlivePhoneNumber());
 
         // Production có thể để initial delay âm (mặc định) để chờ đủ chu kỳ.
@@ -63,11 +63,8 @@ public class PublishSmsSchedule implements AutoCloseable {
         try {
             synchronized (modemLock) {
 
-                log.info("Bắt đầu gửi SMS định kỳ tới {}", keepAlivePhoneNumber);
-
-                var sms = sendSms(keepAlivePhoneNumber, keepAliveMsg);
-
-                log.info("Đã gửi SMS {} định kỳ tới {}", sms, keepAlivePhoneNumber);
+                sendSms(keepAlivePhoneNumber, keepAliveMsg);
+                log.info("Keep-alive OK | to={}", keepAlivePhoneNumber);
             }
 
         } catch (Exception e) {

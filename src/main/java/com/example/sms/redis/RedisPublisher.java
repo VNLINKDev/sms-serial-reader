@@ -113,11 +113,11 @@ public class RedisPublisher implements AutoCloseable {
         try {
             if (config.getRedisMode() == AppConfig.RedisMode.LIST) {
                 commands.rpush(target, json);
-                log.info("Đã RPUSH SMS index={} transactionId={} vào list '{}'.",
+                log.debug("Redis RPUSH | index={} | tx={} | target={}",
                         message.getIndex(), message.getTransactionId(), target);
             } else {
                 commands.set(target, json);
-                log.info("Đã SET SMS index={} transactionId={} vào key '{}'.",
+                log.debug("Redis SET | index={} | tx={} | target={}",
                         message.getIndex(), message.getTransactionId(), target);
             }
         } catch (Exception e) {

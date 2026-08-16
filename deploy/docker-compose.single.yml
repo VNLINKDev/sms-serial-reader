@@ -17,8 +17,6 @@ services:
     volumes:
       - ${SINGLE_SIM_LOG_DIR:-./logs/single}:/app/logs
     logging:
-      driver: local
+      driver: json-file
       options:
         max-size: 20m
-        max-file: "5"
-

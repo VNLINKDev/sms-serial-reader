@@ -158,6 +158,15 @@ java -jar target/sms-serial-reader-1.0.0.jar
 
 ### 3. Vận hành nhiều SIM trên cùng một host
 
+Copy bộ deploy hiện có tới `hoanganh.nguyen@10.10.10.5:~/smsotpv2`:
+
+```bash
+./deploy/copy-to-server.sh
+```
+
+Script dùng SSH key nếu đã cấu hình, nếu chưa sẽ hỏi password theo cơ chế chuẩn
+của `ssh`/`scp`. Script không copy source hoặc thư mục log.
+
 Hai service `sim01` và `sim02` dùng chung image nhưng nạp file cấu hình riêng.
 Mỗi service được map đúng serial device của SIM tương ứng.
 

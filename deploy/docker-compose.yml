@@ -8,10 +8,9 @@ x-sms-reader: &sms-reader
   restart: unless-stopped
   stop_grace_period: 20s
   logging:
-    driver: local
+    driver: json-file
     options:
       max-size: 20m
-      max-file: "5"
 
 services:
   sim01:

@@ -25,14 +25,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class SmsReaderApplication {
 
     public static void main(String[] args) {
-        System.out.println("==================================================");
-        System.out.println("Đang khởi động ứng dụng đọc SMS qua Serial (Java thuần)...");
-        System.out.println("==================================================");
+        log.info("SMS Reader đang khởi động");
 
         // 1. Khởi tạo cấu hình từ biến môi trường
         AppConfig config = new AppConfig();
         if (config.getPhoneNumber() == null) {
-            System.out.println("PHONE_NUMBER chưa được cấu hình");
+            log.error("Thiếu PHONE_NUMBER");
             System.exit(1);
         }
 
@@ -41,7 +39,7 @@ public class SmsReaderApplication {
         try {
             portManager.open();
         } catch (Exception e) {
-            System.err.println("NGHIÊM TRỌNG: Không thể mở cổng serial khi khởi động: " + e.getMessage());
+            log.error("Mở serial thất bại | error={}", e.getMessage());
             System.exit(1);
         }
 
@@ -54,7 +52,6 @@ public class SmsReaderApplication {
         SmsParser smsParser = new SmsParser(config.getSmsOtpPattern());
         SmsService smsService = new SmsService(atClient, smsParser, config);
 
-        System.out.println("Tạo lịch trình bắn sms mỗi 5 ngày với SĐT: " + config.getPhoneNumber());
         PublishSmsSchedule smsSchedule = new PublishSmsSchedule(config, smsService, modemLock);
 
         // 5. Khởi tạo Redis integration
@@ -62,7 +59,7 @@ public class SmsReaderApplication {
         try {
             redisPublisher.connect();
         } catch (Exception e) {
-            System.err.println("NGHIÊM TRỌNG: Không thể kết nối Redis khi khởi động: " + e.getMessage());
+            log.error("Kết nối Redis thất bại | error={}", e.getMessage());
             closeQuietly(redisPublisher, "Redis publisher");
             portManager.close();
             System.exit(1);
@@ -84,9 +81,7 @@ public class SmsReaderApplication {
         // 8. Đăng ký JVM Shutdown Hook trước khi runtime start để mọi failure sau
         // điểm này đều đi qua cùng một đường cleanup.
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.out.println("==================================================");
-            System.out.println("JVM đã kích hoạt hook tắt ứng dụng. Đang tắt an toàn...");
-            System.out.println("==================================================");
+            log.info("Đang tắt ứng dụng");
 
             shutdownGracefully(runtime, smsSchedule, redisPublisher, shutdownStarted);
             shutdownLatch.countDown();
@@ -95,7 +90,7 @@ public class SmsReaderApplication {
         try {
             runtime.run();
         } catch (Exception e) {
-            System.err.println("NGHIÊM TRỌNG: Bộ chạy đọc SMS khởi chạy thất bại: " + e.getMessage());
+            log.error("Khởi động runtime thất bại | error={}", e.getMessage());
             shutdownGracefully(runtime, smsSchedule, redisPublisher, shutdownStarted);
             System.exit(1);
         }
@@ -122,19 +117,19 @@ public class SmsReaderApplication {
         try {
             runtime.shutdown();
         } catch (Exception e) {
-            System.err.println("Lỗi khi tắt runtime: " + e.getMessage());
+            log.error("Tắt runtime thất bại | error={}", e.getMessage());
         }
 
         closeQuietly(smsSchedule, "lịch gửi SMS định kỳ");
         closeQuietly(redisPublisher, "bộ phát Redis");
-        System.out.println("Đã tắt ứng dụng hoàn tất. Tạm biệt!");
+        log.info("Ứng dụng đã dừng");
     }
 
     private static void closeQuietly(AutoCloseable resource, String name) {
         try {
             resource.close();
         } catch (Exception e) {
-            System.err.println("Lỗi khi đóng " + name + ": " + e.getMessage());
+            log.warn("Đóng {} thất bại | error={}", name, e.getMessage());
         }
     }
 }

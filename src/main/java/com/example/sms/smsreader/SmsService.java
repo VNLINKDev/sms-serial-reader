@@ -1,16 +1,5 @@
 package com.example.sms.smsreader;
 
-import com.example.sms.serial.AtCommandClient;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import com.example.sms.config.AppConfig;
-import com.example.sms.exception.NonOtpSmsException;
-import com.example.sms.exception.SerialPortException;
-import com.example.sms.exception.ModemTimeoutException;
-
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -18,6 +7,15 @@ import java.util.List;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.example.sms.config.AppConfig;
+import com.example.sms.exception.ModemTimeoutException;
+import com.example.sms.exception.NonOtpSmsException;
+import com.example.sms.exception.SerialPortException;
+import com.example.sms.serial.AtCommandClient;
 
 /**
  * Service nghiệp vụ đọc SMS từ modem theo chỉ số bộ nhớ và chuyển thành
@@ -69,15 +67,11 @@ public class SmsService {
      * @return {@link Optional} chứa tin nhắn đã phân tích, hoặc rỗng nếu đọc thất bại.
      */
     public Optional<SmsMessage> readAndParse(int index) {
-        log.debug("Đang đọc SMS tại index {}...", index);
-        log.info("Đang đọc SMS tại index {}...", index);
+        log.debug("Đọc SMS | index={}", index);
         try {
             String response = atClient.sendAndWait("AT+CMGR=" + index);
-            log.debug("Phản hồi thô cho index {}: {}", index, response);
-            log.info("Phản hồi thô cho index {}: {}", index, response);;
+            log.trace("SMS raw | index={} | response={}", index, response);
             SmsMessage msg  = smsParser.parse(index, response);
-            log.debug("Đã phân tích SMS tại index {}: {}", index, msg);
-            log.info("Đã phân tích SMS tại index {}: {}", index, msg);
             if (config.isDeleteSmsAfterRead()) {
                 deleteSms(index);
             }
@@ -87,8 +81,7 @@ public class SmsService {
         } catch (NonOtpSmsException e) {
             // SMS không phải OTP => xóa ngay khỏi SIM để giải phóng bộ nhớ,
             // bất kể cấu hình DELETE_SMS_AFTER_READ.
-            log.info("[NON-OTP SMS] index={} | {}", index, e.getMessage()); // NEW
-            log.debug("SMS tại index {} không phải OTP — đang xóa khỏi SIM: {}", index, e.getMessage());
+            log.info("SMS bỏ qua | index={} | reason=không khớp OTP", index);
             deleteSms(index);
             return Optional.empty();
         } catch (Exception e) {
@@ -120,33 +113,28 @@ public class SmsService {
      */
     public List<SmsMessage> readAndParseAll() {
         List<Integer> indexes = listAllIndexes();
-        log.debug("Quét định kỳ: tìm thấy {} SMS trên SIM, indexes: {}", indexes.size(), indexes);
-        log.info("Quét định kỳ: tìm thấy {} SMS trên SIM, indexes: {}", indexes.size(), indexes);
+        log.debug("Quét SIM | total={} | indexes={}", indexes.size(), indexes);
         List<SmsMessage> messages = new ArrayList<>();
         for (int index : indexes) {
             try {
                 String response = atClient.sendAndWait("AT+CMGR=" + index);
-                log.info("Phản hồi thô cho index {}: {}", index, response);;
+                log.trace("SMS raw | index={} | response={}", index, response);
                 SmsMessage msg = smsParser.parse(index, response);
                 messages.add(msg);
-                log.debug("Quét định kỳ: đã phân tích SMS tại index {}: {}", index, msg);
-                log.info("Quét định kỳ: đã phân tích SMS tại index {}: {}", index, msg);
             } catch (com.example.sms.exception.NonOtpSmsException e) {
-                log.info("[NON-OTP SMS] index={} | {}", index, e.getMessage()); // NEW
-                log.debug("Quét định kỳ: SMS tại index {} không phải OTP — đang xóa khỏi SIM: {}", index, e.getMessage());
+                log.info("SMS bỏ qua | index={} | reason=không khớp OTP", index);
                 deleteSms(index);
             } catch (SerialPortException | ModemTimeoutException e) {
                 throw e;
             } catch (Exception e) {
-                log.warn("Quét định kỳ: không thể đọc/phân tích SMS tại index {}: {}", index, e.getMessage());
-                log.info("Quét định kỳ: không thể đọc/phân tích SMS tại index {}: {}", index, e.getMessage());
+                log.warn("SMS lỗi | index={} | error={}", index, e.getMessage());
             }
         }
 
         // Sắp xếp theo timestamp thực tế trong nội dung SMS.
         // Modem tái sử dụng slot đã xóa, nên index KHÔNG phản ánh thứ tự nhận.
         messages.sort(Comparator.comparing(msg -> msg.getTimestamp().toInstant()));
-        log.debug("Quét định kỳ: đã phân tích {} SMS OTP, sắp xếp theo timestamp.", messages.size());
+        log.debug("Quét xong | otp={}", messages.size());
         return messages;
     }
     
@@ -176,7 +164,7 @@ public class SmsService {
      */
     public List<Integer> listAllIndexes() {
         String response = atClient.sendAndWait("AT+CMGL=\"ALL\"");
-        log.debug("Phản hồi thô danh sách toàn bộ SMS: {}", response);
+        log.trace("Danh sách SMS raw | response={}", response);
 
         List<Integer> indexes = new ArrayList<>();
         Matcher matcher = cmglIndexPattern.matcher(response);
