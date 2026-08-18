@@ -81,7 +81,8 @@ public class SmsService {
         } catch (NonOtpSmsException e) {
             // SMS không phải OTP => xóa ngay khỏi SIM để giải phóng bộ nhớ,
             // bất kể cấu hình DELETE_SMS_AFTER_READ.
-            log.info("SMS bỏ qua | index={} | reason=không khớp OTP", index);
+            log.info(">>> SMS KHÔNG KHỚP OTP | index={} | content={} <<<",
+                    index, nonOtpContent(e));
             deleteSms(index);
             return Optional.empty();
         } catch (Exception e) {
@@ -122,7 +123,8 @@ public class SmsService {
                 SmsMessage msg = smsParser.parse(index, response);
                 messages.add(msg);
             } catch (com.example.sms.exception.NonOtpSmsException e) {
-                log.info("SMS bỏ qua | index={} | reason=không khớp OTP", index);
+                log.info(">>> SMS KHÔNG KHỚP OTP | index={} | content={} <<<",
+                        index, nonOtpContent(e));
                 deleteSms(index);
             } catch (SerialPortException | ModemTimeoutException e) {
                 throw e;
@@ -308,5 +310,13 @@ public class SmsService {
                 || response.contains("ERROR")
                 || response.contains("+CME ERROR")
                 || response.contains("+CMS ERROR");
+    }
+
+    private static String nonOtpContent(NonOtpSmsException exception) {
+        String content = exception.getSmsContent();
+        if (content == null || content.isBlank()) {
+            content = exception.getMessage();
+        }
+        return content == null ? "" : content.replaceAll("[\\r\\n]+", " | ").trim();
     }
 }

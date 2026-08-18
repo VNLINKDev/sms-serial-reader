@@ -211,8 +211,9 @@ public class SmsReaderRuntime {
         String latestId = latest.getTransactionId();
 
         if (!Objects.equals(latestId, lastLoggedTransactionId)) {
-            log.info(">>> SMS MỚI | index={} | tx={} | otp={} | time={} | stored={} <<<",
-                    latest.getIndex(), latestId, maskOtp(latest.getOtp()), latest.getTimestamp(), allMessages.size());
+            log.info(">>> SMS MỚI | sim={} | index={} | tx={} | otp={} | time={} | stored={} <<<",
+                    appConfig.getPhoneNumber(), latest.getIndex(), latestId, latest.getOtp(),
+                    latest.getTimestamp(), allMessages.size());
             lastLoggedTransactionId = latestId;
         }
 
@@ -255,10 +256,6 @@ public class SmsReaderRuntime {
 
     private long redisBackoffMs(int failedAttempt) {
         return 1000L << Math.max(0, failedAttempt - 1);
-    }
-
-    private static String maskOtp(String otp) {
-        return otp == null || otp.isBlank() ? "-" : "******";
     }
 
     // ========================================================================

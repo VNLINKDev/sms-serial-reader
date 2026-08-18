@@ -70,6 +70,7 @@ class SmsParserTest {
         });
 
         assertTrue(exception.getMessage().contains("Không thể trích xuất OTP"));
+        assertEquals("Hello, this is a plain text message without OTP.", exception.getSmsContent());
     }
 
     @Test

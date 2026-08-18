@@ -88,7 +88,7 @@ public class SmsParser {
         Matcher otpMatcher = otpPattern.matcher(body);
 
         if (!otpMatcher.find()) {
-            throw new NonOtpSmsException("Không thể trích xuất OTP từ nội dung SMS: " + body);
+            throw new NonOtpSmsException("Không thể trích xuất OTP từ nội dung SMS", body);
         }
 
         String transactionId = otpMatcher.group(1);
